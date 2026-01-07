@@ -178,6 +178,10 @@ Ensure:
 2. Key-based authentication is set up (password prompts won't work in non-interactive mode)
 3. The host alias (if using SSH config) is correctly configured
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and testing instructions.
+
 ## License
 
 MIT
