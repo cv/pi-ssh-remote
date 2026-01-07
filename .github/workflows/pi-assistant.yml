@@ -28,7 +28,7 @@ jobs:
           node-version: "25"
 
       - name: Run pi-action
-        uses: cv/pi-action@v1
+        uses: cv/pi-action@v1.4.5
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pi_auth_json: ${{ secrets.PI_AUTH_JSON }}
