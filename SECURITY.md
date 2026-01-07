@@ -44,6 +44,64 @@ pi-ssh-remote is a [pi coding agent](https://github.com/badlogic/pi-mono) extens
 
 ---
 
+## Trust Model & Security Implications
+
+### What This Extension Does
+
+When you configure pi-ssh-remote with a remote host, **all file operations and commands from the pi agent are executed on that remote host**. This includes:
+
+- **`bash`**: Executes arbitrary shell commands
+- **`read`**: Reads any file the SSH user can access
+- **`write`**: Creates or overwrites any file the SSH user can write to
+- **`edit`**: Modifies any file the SSH user can write to
+- **`grep`/`find`/`ls`**: Searches and lists files
+
+### Who You're Trusting
+
+By using this extension, you are trusting:
+
+| Entity | What You're Trusting |
+|--------|---------------------|
+| **The LLM** | To generate safe, appropriate commands for your remote host |
+| **The pi agent** | To faithfully execute the LLM's requests |
+| **The remote host** | To execute commands as expected and return accurate results |
+| **Your SSH configuration** | To authenticate only to intended hosts |
+| **Network path** | That SSH encryption protects data in transit |
+
+### Security Implications
+
+⚠️ **Remote Command Execution**: The `bash` tool allows execution of arbitrary commands. An LLM could potentially execute destructive commands (`rm -rf`, `shutdown`, etc.) if instructed or manipulated to do so.
+
+⚠️ **Data Exposure**: All file contents read via `read` or `grep` are sent to the LLM provider's API. Do not use this extension with files containing secrets, credentials, or sensitive data you wouldn't want sent to a third-party API.
+
+⚠️ **Compromised Remote Host**: If the remote host is compromised, an attacker could:
+- Observe all commands and file contents
+- Return manipulated data to influence LLM behavior
+- Modify files in unexpected ways
+
+### Session Data Storage
+
+This extension persists SSH configuration in pi's session files:
+
+```typescript
+{
+    host: "user@example.com",
+    remoteCwd: "/home/user/project",
+    port: 2222,
+    command: "tsh ssh"  // if using custom SSH command
+}
+```
+
+**Note:** Session files are stored in plaintext. While no passwords are stored (key-based authentication is required), the session files contain:
+- SSH username and hostname
+- Remote working directory path
+- Custom SSH command (if configured)
+- Port number (if non-default)
+
+Ensure your pi session directory has appropriate permissions (readable only by you). On most systems, this is `~/.pi/` or a project-local `.pi/` directory.
+
+---
+
 ## Security Findings
 
 ### ✅ Positive Security Practices
@@ -225,18 +283,19 @@ The extension has no runtime dependencies beyond the peer dependency, which sign
 ## Recommendations Summary
 
 ### High Priority
-1. Add documentation about the trust model and security implications of remote command execution
-2. Document that session files may contain connection information
+1. ✅ ~~Add documentation about the trust model and security implications of remote command execution~~ (see "Trust Model & Security Implications" section above)
+2. ✅ ~~Document that session files may contain connection information~~ (see "Session Data Storage" section above)
 
-### Medium Priority
-3. Consider adding optional confirmation prompts for write operations
-4. Add command execution logging option for audit purposes
-5. Document SSH key security best practices (use dedicated keys, limit permissions)
+### Medium Priority (Deferred)
+These items are better addressed by separate pi extensions or documentation:
+- Confirmation prompts for write operations
+- Command execution logging for audit purposes
+- SSH key security best practices
 
-### Low Priority
-6. Consider pattern length limits for grep/find
-7. Add optional host allowlist feature
-8. Consider timeout configuration for all operations
+### Low Priority (Not Planned)
+- Pattern length limits for grep/find
+- Optional host allowlist feature
+- Timeout configuration for all operations
 
 ---
 
@@ -260,4 +319,5 @@ The extension has no runtime dependencies beyond the peer dependency, which sign
 
 | Date | Version | Changes |
 |------|---------|---------|
-| 2026-01-06 | Initial | Initial security audit |
+| 2026-01-06 | 1.1 | Added Trust Model & Security Implications section, Session Data Storage documentation |
+| 2026-01-06 | 1.0 | Initial security audit |
