@@ -5,6 +5,53 @@
  * by mocking the pi ExtensionAPI and simulating tool executions.
  */
 
+// Mock the create*Tool functions from pi-coding-agent
+// These are used for local fallback when no SSH host is configured
+const mockBashExecute = jest.fn();
+const mockReadExecute = jest.fn();
+const mockWriteExecute = jest.fn();
+const mockEditExecute = jest.fn();
+const mockGrepExecute = jest.fn();
+const mockFindExecute = jest.fn();
+const mockLsExecute = jest.fn();
+
+const mockCreateBashTool = jest.fn(() => ({ execute: mockBashExecute }));
+const mockCreateReadTool = jest.fn(() => ({ execute: mockReadExecute }));
+const mockCreateWriteTool = jest.fn(() => ({ execute: mockWriteExecute }));
+const mockCreateEditTool = jest.fn(() => ({ execute: mockEditExecute }));
+const mockCreateGrepTool = jest.fn(() => ({ execute: mockGrepExecute }));
+const mockCreateFindTool = jest.fn(() => ({ execute: mockFindExecute }));
+const mockCreateLsTool = jest.fn(() => ({ execute: mockLsExecute }));
+
+jest.mock("@mariozechner/pi-coding-agent", () => ({
+	DEFAULT_MAX_BYTES: 50000,
+	DEFAULT_MAX_LINES: 2000,
+	formatSize: (bytes: number) => `${bytes}B`,
+	truncateTail: jest.fn((content: string, options?: { maxLines?: number; maxBytes?: number }) => {
+		const maxLines = options?.maxLines ?? 2000;
+		const lines = content.split("\n");
+		const totalLines = lines.length;
+		const truncated = totalLines > maxLines;
+		const outputLines = truncated ? maxLines : totalLines;
+		const outputContent = truncated ? lines.slice(-maxLines).join("\n") : content;
+		return {
+			content: outputContent,
+			truncated,
+			outputLines,
+			totalLines,
+			outputBytes: outputContent.length,
+			totalBytes: content.length,
+		};
+	}),
+	createBashTool: mockCreateBashTool,
+	createReadTool: mockCreateReadTool,
+	createWriteTool: mockCreateWriteTool,
+	createEditTool: mockCreateEditTool,
+	createGrepTool: mockCreateGrepTool,
+	createFindTool: mockCreateFindTool,
+	createLsTool: mockCreateLsTool,
+}));
+
 // We need to extract and test the helper functions and tool logic
 // Since the extension exports a single function, we'll test it through mocks
 
@@ -421,23 +468,47 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("bash tool", () => {
+		beforeEach(() => {
+			// Reset all local tool mocks before each test
+			mockBashExecute.mockReset();
+			mockReadExecute.mockReset();
+			mockWriteExecute.mockReset();
+			mockEditExecute.mockReset();
+			mockGrepExecute.mockReset();
+			mockFindExecute.mockReset();
+			mockLsExecute.mockReset();
+			mockCreateBashTool.mockClear();
+			mockCreateReadTool.mockClear();
+			mockCreateWriteTool.mockClear();
+			mockCreateEditTool.mockClear();
+			mockCreateGrepTool.mockClear();
+			mockCreateFindTool.mockClear();
+			mockCreateLsTool.mockClear();
+		});
+
 		it("should execute locally when no SSH host configured", async () => {
 			const api = createMockExtensionAPI();
-			const execMock = jest.fn().mockResolvedValue({
-				stdout: "hello world",
-				stderr: "",
-				code: 0,
-				killed: false,
-			});
-			api._setExecMock(execMock);
 			extensionFn(api);
+
+			// Configure mock to return expected result
+			mockBashExecute.mockResolvedValue({
+				content: [{ type: "text", text: "hello world" }],
+				details: { exitCode: 0 },
+			});
 
 			const ctx = createMockContext();
 			const bashTool = api._registeredTools.get("bash");
 
 			const result = await bashTool.execute("tool-1", { command: "echo hello" }, undefined, ctx, undefined);
 
-			expect(execMock).toHaveBeenCalledWith("bash", ["-c", "echo hello"], expect.any(Object));
+			// Verify delegation to pi's built-in bash tool
+			expect(mockCreateBashTool).toHaveBeenCalledWith(ctx.cwd);
+			expect(mockBashExecute).toHaveBeenCalledWith(
+				"tool-1",
+				{ command: "echo hello", timeout: undefined },
+				undefined,
+				undefined
+			);
 			expect(result.content[0].text).toBe("hello world");
 			expect(result.details.remote).toBe(false);
 		});
@@ -495,7 +566,7 @@ describe("ssh-remote extension", () => {
 			);
 		});
 
-		it("should include exit code in output for non-zero exit", async () => {
+		it("should include exit code in output for non-zero exit (remote)", async () => {
 			const api = createMockExtensionAPI();
 			const execMock = jest.fn().mockResolvedValue({
 				stdout: "",
@@ -507,6 +578,11 @@ describe("ssh-remote extension", () => {
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote behavior
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const bashTool = api._registeredTools.get("bash");
 
 			const result = await bashTool.execute("tool-1", { command: "nonexistent" }, undefined, ctx, undefined);
@@ -517,24 +593,31 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("read tool", () => {
+		beforeEach(() => {
+			mockReadExecute.mockReset();
+			mockCreateReadTool.mockClear();
+		});
+
 		it("should read file locally when no SSH host configured", async () => {
 			const api = createMockExtensionAPI();
-			const execMock = jest.fn().mockResolvedValue({
-				stdout: "file content here",
-				stderr: "",
-				code: 0,
-				killed: false,
-			});
-			api._setExecMock(execMock);
 			extensionFn(api);
+
+			// Configure mock to return expected result
+			mockReadExecute.mockResolvedValue({
+				content: [{ type: "text", text: "file content here" }],
+				details: { path: "test.txt" },
+			});
 
 			const ctx = createMockContext();
 			const readTool = api._registeredTools.get("read");
 
 			const result = await readTool.execute("tool-1", { path: "test.txt" }, undefined, ctx, undefined);
 
-			expect(execMock).toHaveBeenCalledWith("cat", ["test.txt"], expect.any(Object));
+			// Verify delegation to pi's built-in read tool
+			expect(mockCreateReadTool).toHaveBeenCalledWith(ctx.cwd);
+			expect(mockReadExecute).toHaveBeenCalled();
 			expect(result.content[0].text).toBe("file content here");
+			expect(result.details.remote).toBe(false);
 		});
 
 		it("should read file via SSH when host is configured", async () => {
@@ -591,27 +674,33 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("write tool", () => {
+		beforeEach(() => {
+			mockWriteExecute.mockReset();
+			mockCreateWriteTool.mockClear();
+		});
+
 		it("should write file locally when no SSH host configured", async () => {
 			const api = createMockExtensionAPI();
-			const execMock = jest.fn().mockResolvedValue({
-				stdout: "",
-				stderr: "",
-				code: 0,
-				killed: false,
-			});
-			api._setExecMock(execMock);
 			extensionFn(api);
+
+			const content = "hello world";
+			// Configure mock to return expected result
+			mockWriteExecute.mockResolvedValue({
+				content: [{ type: "text", text: `Successfully wrote ${content.length} bytes to test.txt` }],
+				details: { path: "test.txt", bytes: content.length },
+			});
 
 			const ctx = createMockContext();
 			const writeTool = api._registeredTools.get("write");
 
-			const content = "hello world";
 			const result = await writeTool.execute("tool-1", { path: "test.txt", content }, undefined, ctx, undefined);
 
-			// Should create directory first
-			expect(execMock).toHaveBeenCalledWith("bash", ["-c", expect.stringContaining("mkdir -p")], expect.any(Object));
+			// Verify delegation to pi's built-in write tool
+			expect(mockCreateWriteTool).toHaveBeenCalledWith(ctx.cwd);
+			expect(mockWriteExecute).toHaveBeenCalled();
 			expect(result.content[0].text).toContain("Successfully wrote");
 			expect(result.details.bytes).toBe(content.length);
+			expect(result.details.remote).toBe(false);
 		});
 
 		it("should write file via SSH with base64 encoding", async () => {
@@ -647,30 +736,20 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("edit tool", () => {
+		beforeEach(() => {
+			mockEditExecute.mockReset();
+			mockCreateEditTool.mockClear();
+		});
+
 		it("should edit file locally when no SSH host configured", async () => {
 			const api = createMockExtensionAPI();
-			let callCount = 0;
-			const execMock = jest.fn().mockImplementation(() => {
-				callCount++;
-				if (callCount === 1) {
-					// Read
-					return Promise.resolve({
-						stdout: "hello world",
-						stderr: "",
-						code: 0,
-						killed: false,
-					});
-				}
-				// Write
-				return Promise.resolve({
-					stdout: "",
-					stderr: "",
-					code: 0,
-					killed: false,
-				});
-			});
-			api._setExecMock(execMock);
 			extensionFn(api);
+
+			// Configure mock to return expected result
+			mockEditExecute.mockResolvedValue({
+				content: [{ type: "text", text: "Successfully edited test.txt (+0 lines)" }],
+				details: { path: "test.txt", lineDelta: 0 },
+			});
 
 			const ctx = createMockContext();
 			const editTool = api._registeredTools.get("edit");
@@ -683,11 +762,14 @@ describe("ssh-remote extension", () => {
 				undefined
 			);
 
+			// Verify delegation to pi's built-in edit tool
+			expect(mockCreateEditTool).toHaveBeenCalledWith(ctx.cwd);
+			expect(mockEditExecute).toHaveBeenCalled();
 			expect(result.content[0].text).toContain("Successfully edited");
 			expect(result.details.remote).toBe(false);
 		});
 
-		it("should fail when oldText is not found", async () => {
+		it("should fail when oldText is not found (remote)", async () => {
 			const api = createMockExtensionAPI();
 			const execMock = jest.fn().mockResolvedValue({
 				stdout: "hello world",
@@ -699,6 +781,11 @@ describe("ssh-remote extension", () => {
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote behavior
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const editTool = api._registeredTools.get("edit");
 
 			const result = await editTool.execute(
@@ -713,7 +800,7 @@ describe("ssh-remote extension", () => {
 			expect(result.content[0].text).toContain("oldText not found");
 		});
 
-		it("should fail when oldText appears multiple times", async () => {
+		it("should fail when oldText appears multiple times (remote)", async () => {
 			const api = createMockExtensionAPI();
 			const execMock = jest.fn().mockResolvedValue({
 				stdout: "hello hello hello",
@@ -725,6 +812,11 @@ describe("ssh-remote extension", () => {
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote behavior
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const editTool = api._registeredTools.get("edit");
 
 			const result = await editTool.execute(
@@ -741,22 +833,31 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("grep tool", () => {
+		beforeEach(() => {
+			mockGrepExecute.mockReset();
+			mockCreateGrepTool.mockClear();
+		});
+
 		it("should execute grep locally when SSH is not configured", async () => {
 			const api = createMockExtensionAPI();
-			(api.exec as jest.Mock).mockResolvedValue({
-				stdout: "file.txt:1:matching line\n",
-				stderr: "",
-				code: 0,
+			extensionFn(api);
+
+			// Configure mock to return expected result
+			mockGrepExecute.mockResolvedValue({
+				content: [{ type: "text", text: "file.txt:1:matching line\n" }],
+				details: {},
 			});
 
-			extensionFn(api);
 			const ctx = createMockContext();
 			const grepTool = api._registeredTools.get("grep");
 
 			const result = await grepTool.execute("tool-1", { pattern: "test" }, undefined, ctx, undefined);
 
-			expect(api.exec).toHaveBeenCalledWith("bash", expect.arrayContaining(["-c"]), expect.any(Object));
+			// Verify delegation to pi's built-in grep tool
+			expect(mockCreateGrepTool).toHaveBeenCalledWith(ctx.cwd);
+			expect(mockGrepExecute).toHaveBeenCalled();
 			expect(result.content[0].text).toContain("matching line");
+			expect(result.details.remote).toBe(false);
 		});
 
 		it("should execute grep via SSH when configured", async () => {
@@ -781,7 +882,7 @@ describe("ssh-remote extension", () => {
 			expect(result.details.remote).toBe(true);
 		});
 
-		it("should return 'No matches found' when grep finds nothing", async () => {
+		it("should return 'No matches found' when grep finds nothing (remote)", async () => {
 			const api = createMockExtensionAPI();
 			(api.exec as jest.Mock).mockResolvedValue({
 				stdout: "",
@@ -790,7 +891,12 @@ describe("ssh-remote extension", () => {
 			});
 
 			extensionFn(api);
+
+			// Configure SSH to test remote behavior
+			const sshCommand = api._registeredCommands.get("ssh");
 			const ctx = createMockContext();
+			await sshCommand.handler("user@remote.com", ctx);
+
 			const grepTool = api._registeredTools.get("grep");
 
 			const result = await grepTool.execute("tool-1", { pattern: "nonexistent" }, undefined, ctx, undefined);
@@ -800,22 +906,31 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("find tool", () => {
+		beforeEach(() => {
+			mockFindExecute.mockReset();
+			mockCreateFindTool.mockClear();
+		});
+
 		it("should execute find locally when SSH is not configured", async () => {
 			const api = createMockExtensionAPI();
-			(api.exec as jest.Mock).mockResolvedValue({
-				stdout: "./src/file.ts\n./lib/other.ts\n",
-				stderr: "",
-				code: 0,
+			extensionFn(api);
+
+			// Configure mock to return expected result
+			mockFindExecute.mockResolvedValue({
+				content: [{ type: "text", text: "./src/file.ts\n./lib/other.ts\n" }],
+				details: {},
 			});
 
-			extensionFn(api);
 			const ctx = createMockContext();
 			const findTool = api._registeredTools.get("find");
 
 			const result = await findTool.execute("tool-1", { pattern: "*.ts" }, undefined, ctx, undefined);
 
-			expect(api.exec).toHaveBeenCalledWith("bash", expect.arrayContaining(["-c"]), expect.any(Object));
+			// Verify delegation to pi's built-in find tool
+			expect(mockCreateFindTool).toHaveBeenCalledWith(ctx.cwd);
+			expect(mockFindExecute).toHaveBeenCalled();
 			expect(result.content[0].text).toContain("file.ts");
+			expect(result.details.remote).toBe(false);
 		});
 
 		it("should execute find via SSH when configured", async () => {
@@ -840,7 +955,7 @@ describe("ssh-remote extension", () => {
 			expect(result.details.remote).toBe(true);
 		});
 
-		it("should return 'No files found' when find finds nothing", async () => {
+		it("should return 'No files found' when find finds nothing (remote)", async () => {
 			const api = createMockExtensionAPI();
 			(api.exec as jest.Mock).mockResolvedValue({
 				stdout: "",
@@ -849,7 +964,12 @@ describe("ssh-remote extension", () => {
 			});
 
 			extensionFn(api);
+
+			// Configure SSH to test remote behavior
+			const sshCommand = api._registeredCommands.get("ssh");
 			const ctx = createMockContext();
+			await sshCommand.handler("user@remote.com", ctx);
+
 			const findTool = api._registeredTools.get("find");
 
 			const result = await findTool.execute("tool-1", { pattern: "*.nonexistent" }, undefined, ctx, undefined);
@@ -1042,22 +1162,31 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("ls tool", () => {
+		beforeEach(() => {
+			mockLsExecute.mockReset();
+			mockCreateLsTool.mockClear();
+		});
+
 		it("should execute ls locally when SSH is not configured", async () => {
 			const api = createMockExtensionAPI();
-			(api.exec as jest.Mock).mockResolvedValue({
-				stdout: "file1.txt\nfile2.txt\ndir1\n",
-				stderr: "",
-				code: 0,
+			extensionFn(api);
+
+			// Configure mock to return expected result
+			mockLsExecute.mockResolvedValue({
+				content: [{ type: "text", text: "file1.txt\nfile2.txt\ndir1\n" }],
+				details: {},
 			});
 
-			extensionFn(api);
 			const ctx = createMockContext();
 			const lsTool = api._registeredTools.get("ls");
 
 			const result = await lsTool.execute("tool-1", {}, undefined, ctx, undefined);
 
-			expect(api.exec).toHaveBeenCalledWith("bash", expect.arrayContaining(["-c"]), expect.any(Object));
+			// Verify delegation to pi's built-in ls tool
+			expect(mockCreateLsTool).toHaveBeenCalledWith(ctx.cwd);
+			expect(mockLsExecute).toHaveBeenCalled();
 			expect(result.content[0].text).toContain("file1.txt");
+			expect(result.details.remote).toBe(false);
 		});
 
 		it("should execute ls via SSH when configured", async () => {
@@ -1082,7 +1211,7 @@ describe("ssh-remote extension", () => {
 			expect(result.details.remote).toBe(true);
 		});
 
-		it("should return '(empty directory)' for empty directories", async () => {
+		it("should return '(empty directory)' for empty directories (remote)", async () => {
 			const api = createMockExtensionAPI();
 			(api.exec as jest.Mock).mockResolvedValue({
 				stdout: "",
@@ -1091,7 +1220,12 @@ describe("ssh-remote extension", () => {
 			});
 
 			extensionFn(api);
+
+			// Configure SSH to test remote behavior
+			const sshCommand = api._registeredCommands.get("ssh");
 			const ctx = createMockContext();
+			await sshCommand.handler("user@remote.com", ctx);
+
 			const lsTool = api._registeredTools.get("ls");
 
 			const result = await lsTool.execute("tool-1", { path: "/empty" }, undefined, ctx, undefined);
@@ -1099,7 +1233,7 @@ describe("ssh-remote extension", () => {
 			expect(result.content[0].text).toBe("(empty directory)");
 		});
 
-		it("should handle ls errors", async () => {
+		it("should handle ls errors (remote)", async () => {
 			const api = createMockExtensionAPI();
 			(api.exec as jest.Mock).mockResolvedValue({
 				stdout: "",
@@ -1108,7 +1242,12 @@ describe("ssh-remote extension", () => {
 			});
 
 			extensionFn(api);
+
+			// Configure SSH to test remote behavior
+			const sshCommand = api._registeredCommands.get("ssh");
 			const ctx = createMockContext();
+			await sshCommand.handler("user@remote.com", ctx);
+
 			const lsTool = api._registeredTools.get("ls");
 
 			const result = await lsTool.execute("tool-1", { path: "/nonexistent" }, undefined, ctx, undefined);
@@ -1307,13 +1446,18 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("error handling", () => {
-		it("should handle bash execution errors", async () => {
+		it("should handle bash execution errors (remote)", async () => {
 			const api = createMockExtensionAPI();
 			const execMock = jest.fn().mockRejectedValue(new Error("Connection refused"));
 			api._setExecMock(execMock);
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote error handling
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const bashTool = api._registeredTools.get("bash");
 
 			const result = await bashTool.execute("tool-1", { command: "ls" }, undefined, ctx, undefined);
@@ -1380,7 +1524,7 @@ describe("ssh-remote extension", () => {
 			expect(result.content[0].text).toContain("Error writing file");
 		});
 
-		it("should handle edit read errors", async () => {
+		it("should handle edit read errors (remote)", async () => {
 			const api = createMockExtensionAPI();
 			const execMock = jest.fn().mockResolvedValue({
 				stdout: "",
@@ -1392,6 +1536,11 @@ describe("ssh-remote extension", () => {
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote error handling
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const editTool = api._registeredTools.get("edit");
 
 			const result = await editTool.execute(
@@ -1406,7 +1555,7 @@ describe("ssh-remote extension", () => {
 			expect(result.content[0].text).toContain("Error reading file");
 		});
 
-		it("should handle edit write errors", async () => {
+		it("should handle edit write errors (remote)", async () => {
 			const api = createMockExtensionAPI();
 			let callCount = 0;
 			const execMock = jest.fn().mockImplementation(() => {
@@ -1422,6 +1571,11 @@ describe("ssh-remote extension", () => {
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote error handling
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const editTool = api._registeredTools.get("edit");
 
 			const result = await editTool.execute(
@@ -1458,23 +1612,23 @@ describe("ssh-remote extension", () => {
 	});
 
 	describe("edge cases", () => {
-		it("should handle timeout parameter in bash", async () => {
+		it("should handle timeout parameter in bash (local delegates to pi tool)", async () => {
 			const api = createMockExtensionAPI();
-			const execMock = jest.fn().mockResolvedValue({
-				stdout: "done",
-				stderr: "",
-				code: 0,
-				killed: false,
-			});
-			api._setExecMock(execMock);
 			extensionFn(api);
+
+			// Configure mock to return expected result
+			mockBashExecute.mockResolvedValue({
+				content: [{ type: "text", text: "done" }],
+				details: { exitCode: 0 },
+			});
 
 			const ctx = createMockContext();
 			const bashTool = api._registeredTools.get("bash");
 
 			await bashTool.execute("tool-1", { command: "sleep 10", timeout: 5 }, undefined, ctx, undefined);
 
-			expect(execMock).toHaveBeenCalledWith("bash", ["-c", "sleep 10"], expect.objectContaining({ timeout: 5000 }));
+			// Verify delegation - timeout is passed to local tool
+			expect(mockBashExecute).toHaveBeenCalledWith("tool-1", { command: "sleep 10", timeout: 5 }, undefined, undefined);
 		});
 
 		it("should apply default SSH timeout to bash tool when configured", async () => {
@@ -1843,7 +1997,7 @@ describe("ssh-remote extension", () => {
 			expect(ctx.ui.setStatus).toHaveBeenCalledWith("ssh-remote", expect.stringContaining("branch@host.com"));
 		});
 
-		it("should handle bash output truncation", async () => {
+		it("should handle bash output truncation (remote)", async () => {
 			const api = createMockExtensionAPI();
 			// Generate output that will be truncated
 			const longOutput = Array(3000).fill("line").join("\n");
@@ -1857,6 +2011,11 @@ describe("ssh-remote extension", () => {
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote truncation
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const bashTool = api._registeredTools.get("bash");
 
 			const result = await bashTool.execute("tool-1", { command: "cat bigfile" }, undefined, ctx, undefined);
@@ -1865,7 +2024,7 @@ describe("ssh-remote extension", () => {
 			expect(result.details.truncation).toBeDefined();
 		});
 
-		it("should handle read output truncation", async () => {
+		it("should handle read output truncation (remote)", async () => {
 			const api = createMockExtensionAPI();
 			const longContent = Array(3000).fill("line content").join("\n");
 			const execMock = jest.fn().mockResolvedValue({
@@ -2048,7 +2207,7 @@ describe("ssh-remote extension", () => {
 			expect(rendered.text).toContain("[error]");
 		});
 
-		it("should handle edit with negative line delta", async () => {
+		it("should handle edit with negative line delta (remote)", async () => {
 			const api = createMockExtensionAPI();
 			let callCount = 0;
 			const execMock = jest.fn().mockImplementation(() => {
@@ -2062,6 +2221,11 @@ describe("ssh-remote extension", () => {
 			extensionFn(api);
 
 			const ctx = createMockContext();
+
+			// Configure SSH to test remote edit behavior
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
 			const editTool = api._registeredTools.get("edit");
 
 			const result = await editTool.execute(

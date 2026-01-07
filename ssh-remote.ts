@@ -8,7 +8,19 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "@mariozechner/pi-coding-agent";
+import {
+	createBashTool,
+	createEditTool,
+	createFindTool,
+	createGrepTool,
+	createLsTool,
+	createReadTool,
+	createWriteTool,
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	formatSize,
+	truncateTail,
+} from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
@@ -341,19 +353,22 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional)" })),
 		}),
 
-		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const { command, timeout } = params as { command: string; timeout?: number };
 
-			let fullCommand: string[];
-
-			if (sshHost) {
-				// Execute remotely via SSH
-				const remoteCmd = buildRemoteCommand(command);
-				fullCommand = [...sshPrefix(), remoteCmd];
-			} else {
-				// Execute locally (fallback)
-				fullCommand = ["bash", "-c", command];
+			if (!sshHost) {
+				// Delegate to pi's built-in bash tool
+				const localBash = createBashTool(ctx.cwd);
+				const result = await localBash.execute(_toolCallId, { command, timeout }, signal, onUpdate);
+				return {
+					...result,
+					details: { ...result.details, remote: false },
+				};
 			}
+
+			// Execute remotely via SSH
+			const remoteCmd = buildRemoteCommand(command);
+			const fullCommand = [...sshPrefix(), remoteCmd];
 
 			try {
 				// Use tool-level timeout if provided, otherwise use default SSH timeout
@@ -385,7 +400,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: resultText || "(no output)" }],
 					details: {
 						exitCode: result.code,
-						remote: !!sshHost,
+						remote: true,
 						host: sshHost,
 						truncation: truncation.truncated ? truncation : undefined,
 					},
@@ -393,7 +408,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			} catch (err: unknown) {
 				return {
 					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
-					details: { error: getErrorMessage(err), remote: !!sshHost },
+					details: { error: getErrorMessage(err), remote: true },
 					isError: true,
 				};
 			}
@@ -445,24 +460,16 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
 		}),
 
-		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const { path, offset, limit } = params as { path: string; offset?: number; limit?: number };
 
 			if (!sshHost) {
-				// If no SSH host configured, we shouldn't override the built-in tool
-				// But since we registered it, we need to handle it locally
-				// Use a simple cat command
-				const result = await pi.exec("cat", [path], { signal, cwd: ctx.cwd });
-				if (result.code !== 0) {
-					return {
-						content: [{ type: "text", text: `Error reading file: ${result.stderr}` }],
-						details: { path, remote: false, error: result.stderr },
-						isError: true,
-					};
-				}
+				// Delegate to pi's built-in read tool
+				const localRead = createReadTool(ctx.cwd);
+				const result = await localRead.execute(_toolCallId, { path, offset, limit }, signal, onUpdate);
 				return {
-					content: [{ type: "text", text: result.stdout }],
-					details: { path, remote: false },
+					...result,
+					details: { ...result.details, remote: false },
 				};
 			}
 
@@ -549,8 +556,18 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			content: Type.String({ description: "Content to write to the file" }),
 		}),
 
-		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const { path, content } = params as { path: string; content: string };
+
+			if (!sshHost) {
+				// Delegate to pi's built-in write tool
+				const localWrite = createWriteTool(ctx.cwd);
+				const result = await localWrite.execute(_toolCallId, { path, content }, signal, onUpdate);
+				return {
+					...result,
+					details: { ...result.details, remote: false },
+				};
+			}
 
 			// Encode content as base64 to safely pass through shell
 			const base64Content = Buffer.from(content).toString("base64");
@@ -561,45 +578,6 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			const chunks = [];
 			for (let i = 0; i < base64Content.length; i += MAX_CHUNK_SIZE) {
 				chunks.push(base64Content.slice(i, i + MAX_CHUNK_SIZE));
-			}
-
-			if (!sshHost) {
-				// Local fallback - use bash with base64 decoding
-				try {
-					// Create parent directories
-					await pi.exec("bash", ["-c", `mkdir -p "$(dirname '${path}')"`], {
-						signal,
-						cwd: ctx.cwd,
-					});
-
-					// Write chunks
-					for (let i = 0; i < chunks.length; i++) {
-						const operator = i === 0 ? ">" : ">>";
-						const result = await pi.exec(
-							"bash",
-							["-c", `printf '%s' '${chunks[i]}' | base64 -d ${operator} '${path}'`],
-							{ signal, cwd: ctx.cwd }
-						);
-						if (result.code !== 0) {
-							return {
-								content: [{ type: "text", text: `Error writing file: ${result.stderr}` }],
-								details: { path, remote: false, error: result.stderr },
-								isError: true,
-							};
-						}
-					}
-
-					return {
-						content: [{ type: "text", text: `Successfully wrote ${content.length} bytes to ${path}` }],
-						details: { path, bytes: content.length, remote: false },
-					};
-				} catch (err: unknown) {
-					return {
-						content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
-						details: { path, error: getErrorMessage(err), remote: false },
-						isError: true,
-					};
-				}
 			}
 
 			// Remote write via SSH using base64 encoding with chunking
@@ -688,24 +666,28 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			newText: Type.String({ description: "New text to replace the old text with" }),
 		}),
 
-		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const { path, oldText, newText } = params as { path: string; oldText: string; newText: string };
 
-			// For edit, we need to:
+			if (!sshHost) {
+				// Delegate to pi's built-in edit tool
+				const localEdit = createEditTool(ctx.cwd);
+				const result = await localEdit.execute(_toolCallId, { path, oldText, newText }, signal, onUpdate);
+				return {
+					...result,
+					details: { ...result.details, remote: false },
+				};
+			}
+
+			// For remote edit, we need to:
 			// 1. Read the file
 			// 2. Check if oldText exists exactly once
 			// 3. Replace it with newText
 			// 4. Write the file back
 
-			let readCmd: string[];
-
-			if (sshHost) {
-				const prefix = sshPrefix();
-				const remoteCmd = buildRemoteCommand(`cat ${escapeForShell(path)}`);
-				readCmd = [...prefix, remoteCmd];
-			} else {
-				readCmd = ["cat", path];
-			}
+			const prefix = sshPrefix();
+			const remoteCmd = buildRemoteCommand(`cat ${escapeForShell(path)}`);
+			const readCmd = [...prefix, remoteCmd];
 
 			try {
 				// Read current content
@@ -719,7 +701,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (readResult.code !== 0) {
 					return {
 						content: [{ type: "text", text: `Error reading file: ${readResult.stderr}` }],
-						details: { path, remote: !!sshHost },
+						details: { path, remote: true },
 						isError: true,
 					};
 				}
@@ -737,7 +719,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 								text: `Error: oldText not found in file. Make sure it matches exactly (including whitespace).`,
 							},
 						],
-						details: { path, remote: !!sshHost },
+						details: { path, remote: true },
 						isError: true,
 					};
 				}
@@ -750,7 +732,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 								text: `Error: oldText appears ${occurrences} times in file. It must appear exactly once for safe replacement.`,
 							},
 						],
-						details: { path, occurrences, remote: !!sshHost },
+						details: { path, occurrences, remote: true },
 						isError: true,
 					};
 				}
@@ -760,27 +742,17 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 				// Write back using base64 encoding
 				const base64Content = Buffer.from(newContent).toString("base64");
-				let writeResult;
-				if (sshHost) {
-					const prefix = sshPrefix();
-					const writeCmd = buildRemoteCommand(`echo '${base64Content}' | base64 -d > ${escapeForShell(path)}`);
-					const effectiveTimeout = getEffectiveTimeout();
-					writeResult = await pi.exec(prefix[0], [...prefix.slice(1), writeCmd], {
-						signal,
-						timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
-						cwd: ctx.cwd,
-					});
-				} else {
-					writeResult = await pi.exec("bash", ["-c", `echo '${base64Content}' | base64 -d > '${path}'`], {
-						signal,
-						cwd: ctx.cwd,
-					});
-				}
+				const writeCmd = buildRemoteCommand(`echo '${base64Content}' | base64 -d > ${escapeForShell(path)}`);
+				const writeResult = await pi.exec(prefix[0], [...prefix.slice(1), writeCmd], {
+					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
+					cwd: ctx.cwd,
+				});
 
 				if (writeResult.code !== 0) {
 					return {
 						content: [{ type: "text", text: `Error writing file: ${writeResult.stderr}` }],
-						details: { path, remote: !!sshHost },
+						details: { path, remote: true },
 						isError: true,
 					};
 				}
@@ -798,14 +770,14 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						oldTextLength: oldText.length,
 						newTextLength: newText.length,
 						lineDelta,
-						remote: !!sshHost,
+						remote: true,
 						host: sshHost,
 					},
 				};
 			} catch (err: unknown) {
 				return {
 					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
-					details: { path, error: getErrorMessage(err), remote: !!sshHost },
+					details: { path, error: getErrorMessage(err), remote: true },
 					isError: true,
 				};
 			}
@@ -858,7 +830,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			limit: Type.Optional(Type.Number({ description: "Maximum number of matches to return (default: 100)" })),
 		}),
 
-		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const {
 				pattern,
 				path: searchPath,
@@ -875,11 +847,26 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				limit?: number;
 			};
 
+			if (!sshHost) {
+				// Delegate to pi's built-in grep tool
+				const localGrep = createGrepTool(ctx.cwd);
+				const result = await localGrep.execute(
+					_toolCallId,
+					{ pattern, path: searchPath, ignoreCase, literal, context, limit },
+					signal,
+					onUpdate
+				);
+				return {
+					...result,
+					details: { ...result.details, remote: false },
+				};
+			}
+
 			const effectiveLimit = limit ?? 100;
 			const searchDir = searchPath || ".";
 
 			// Detect available tools on remote
-			const tools = sshHost ? await detectRemoteTools(ctx) : { hasRg: false, hasFd: false, host: "" };
+			const tools = await detectRemoteTools(ctx);
 
 			let cmd: string;
 			if (tools.hasRg) {
@@ -903,13 +890,8 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				cmd = `grep ${grepArgs.join(" ")} ${escapedPattern} ${escapeForShell(searchDir)} 2>/dev/null | head -n ${effectiveLimit}`;
 			}
 
-			let fullCommand: string[];
-			if (sshHost) {
-				const remoteCmd = buildRemoteCommand(cmd);
-				fullCommand = [...sshPrefix(), remoteCmd];
-			} else {
-				fullCommand = ["bash", "-c", cmd];
-			}
+			const remoteCmd = buildRemoteCommand(cmd);
+			const fullCommand = [...sshPrefix(), remoteCmd];
 
 			try {
 				const effectiveTimeout = getEffectiveTimeout();
@@ -924,7 +906,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (!output) {
 					return {
 						content: [{ type: "text", text: "No matches found" }],
-						details: { remote: !!sshHost },
+						details: { remote: true },
 					};
 				}
 
@@ -941,12 +923,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: resultText }],
-					details: { remote: !!sshHost, host: sshHost },
+					details: { remote: true, host: sshHost },
 				};
 			} catch (err: unknown) {
 				return {
 					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
-					details: { error: getErrorMessage(err), remote: !!sshHost },
+					details: { error: getErrorMessage(err), remote: true },
 					isError: true,
 				};
 			}
@@ -972,7 +954,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			limit: Type.Optional(Type.Number({ description: "Maximum number of results (default: 1000)" })),
 		}),
 
-		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const {
 				pattern,
 				path: searchPath,
@@ -983,11 +965,21 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				limit?: number;
 			};
 
+			if (!sshHost) {
+				// Delegate to pi's built-in find tool
+				const localFind = createFindTool(ctx.cwd);
+				const result = await localFind.execute(_toolCallId, { pattern, path: searchPath, limit }, signal, onUpdate);
+				return {
+					...result,
+					details: { ...result.details, remote: false },
+				};
+			}
+
 			const effectiveLimit = limit ?? 1000;
 			const searchDir = searchPath || ".";
 
 			// Detect available tools on remote
-			const tools = sshHost ? await detectRemoteTools(ctx) : { hasRg: false, hasFd: false, host: "" };
+			const tools = await detectRemoteTools(ctx);
 
 			let cmd: string;
 			if (tools.hasFd) {
@@ -999,13 +991,8 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				cmd = `find ${escapeForShell(searchDir)} -name ${escapeForShell(pattern)} 2>/dev/null | head -n ${effectiveLimit}`;
 			}
 
-			let fullCommand: string[];
-			if (sshHost) {
-				const remoteCmd = buildRemoteCommand(cmd);
-				fullCommand = [...sshPrefix(), remoteCmd];
-			} else {
-				fullCommand = ["bash", "-c", cmd];
-			}
+			const remoteCmd = buildRemoteCommand(cmd);
+			const fullCommand = [...sshPrefix(), remoteCmd];
 
 			try {
 				const effectiveTimeout = getEffectiveTimeout();
@@ -1020,7 +1007,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (!output) {
 					return {
 						content: [{ type: "text", text: "No files found matching pattern" }],
-						details: { remote: !!sshHost },
+						details: { remote: true },
 					};
 				}
 
@@ -1037,12 +1024,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: resultText }],
-					details: { remote: !!sshHost, host: sshHost },
+					details: { remote: true, host: sshHost },
 				};
 			} catch (err: unknown) {
 				return {
 					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
-					details: { error: getErrorMessage(err), remote: !!sshHost },
+					details: { error: getErrorMessage(err), remote: true },
 					isError: true,
 				};
 			}
@@ -1067,11 +1054,21 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			limit: Type.Optional(Type.Number({ description: "Maximum number of entries to return (default: 500)" })),
 		}),
 
-		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const { path: listPath, limit } = params as {
 				path?: string;
 				limit?: number;
 			};
+
+			if (!sshHost) {
+				// Delegate to pi's built-in ls tool
+				const localLs = createLsTool(ctx.cwd);
+				const result = await localLs.execute(_toolCallId, { path: listPath, limit }, signal, onUpdate);
+				return {
+					...result,
+					details: { ...result.details, remote: false },
+				};
+			}
 
 			const effectiveLimit = limit ?? 500;
 			const dir = listPath || ".";
@@ -1080,14 +1077,9 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			// Using a script that marks directories with /
 			const cmd = `ls -1a ${escapeForShell(dir)} 2>/dev/null | head -n ${effectiveLimit}`;
 
-			let fullCommand: string[];
-			if (sshHost) {
-				const remoteCmd = buildRemoteCommand(cmd);
-				const prefix = sshPrefix();
-				fullCommand = [...prefix, remoteCmd];
-			} else {
-				fullCommand = ["bash", "-c", cmd];
-			}
+			const remoteCmd = buildRemoteCommand(cmd);
+			const prefix = sshPrefix();
+			const fullCommand = [...prefix, remoteCmd];
 
 			try {
 				const effectiveTimeout = getEffectiveTimeout();
@@ -1100,7 +1092,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (result.code !== 0) {
 					return {
 						content: [{ type: "text", text: `Error: ${result.stderr || "Directory not found"}` }],
-						details: { remote: !!sshHost },
+						details: { remote: true },
 						isError: true,
 					};
 				}
@@ -1110,7 +1102,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (!output) {
 					return {
 						content: [{ type: "text", text: "(empty directory)" }],
-						details: { remote: !!sshHost },
+						details: { remote: true },
 					};
 				}
 
@@ -1127,12 +1119,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: resultText }],
-					details: { remote: !!sshHost, host: sshHost },
+					details: { remote: true, host: sshHost },
 				};
 			} catch (err: unknown) {
 				return {
 					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
-					details: { error: getErrorMessage(err), remote: !!sshHost },
+					details: { error: getErrorMessage(err), remote: true },
 					isError: true,
 				};
 			}
