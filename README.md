@@ -50,6 +50,7 @@ Once pi starts with the extension loaded, use the `/ssh` command:
 /ssh user@example.com /path/to/dir # Set remote host + working directory
 /ssh port 2222                     # Set custom port
 /ssh command tsh ssh               # Set custom SSH command (e.g., Teleport)
+/ssh timeout 60                    # Set timeout for SSH operations (seconds)
 /ssh                               # Show current configuration
 /ssh off                           # Disable remote mode
 ```
@@ -63,6 +64,7 @@ pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com
 pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-cwd /path/to/project
 pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-port 2222
 pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-command "tsh ssh"
+pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-timeout 60
 ```
 
 ### Example session
@@ -82,6 +84,7 @@ pi --tools '' -e ./ssh-remote.ts
 # Then in pi:
 /ssh myuser@myserver.com /home/myuser/project
 /ssh port 2222
+/ssh timeout 30                    # Set 30-second timeout for SSH operations
 ```
 
 ## Features
@@ -105,6 +108,7 @@ pi --tools '' -e ./ssh-remote.ts
 - **Flexible connection options**:
   - Custom port via `--ssh-port` or `/ssh port`
   - Custom SSH command via `--ssh-command` or `/ssh command` (for Teleport, bastion hosts, etc.)
+  - Configurable timeouts via `--ssh-timeout` or `/ssh timeout` to prevent hanging operations
 
 - **Large file support** - Uses chunked base64 encoding for files that exceed shell argument limits
 

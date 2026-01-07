@@ -18,6 +18,7 @@ interface SSHConfig {
 	remoteCwd: string | null;
 	port: number | null;
 	command: string | null;
+	timeout: number | null;
 }
 
 // Cache for remote tool availability
@@ -40,6 +41,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	let remoteCwd: string | null = null;
 	let sshPort: number | null = null;
 	let sshCommand: string | null = null; // Custom SSH command (e.g., "tsh ssh" for Teleport)
+	let sshTimeout: number | null = null; // Default timeout in seconds for SSH operations
 
 	// Cache for remote tool availability (invalidated when host changes)
 	let remoteToolsCache: RemoteToolsCache | null = null;
@@ -65,6 +67,11 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		type: "string",
 	});
 
+	pi.registerFlag("ssh-timeout", {
+		description: "Default timeout for SSH operations in seconds (e.g., 60)",
+		type: "string",
+	});
+
 	// Persist current state
 	function persistState() {
 		pi.appendEntry<SSHConfig>("ssh-remote-config", {
@@ -72,6 +79,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			remoteCwd: remoteCwd,
 			port: sshPort,
 			command: sshCommand,
+			timeout: sshTimeout,
 		});
 	}
 
@@ -81,7 +89,8 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			const portInfo = sshPort ? `:${sshPort}` : "";
 			const cwdInfo = remoteCwd ? ` (${remoteCwd})` : "";
 			const cmdInfo = sshCommand ? ` [${sshCommand.split(" ")[0]}]` : "";
-			ctx.ui.setStatus("ssh-remote", `🔗 SSH: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}`);
+			const timeoutInfo = sshTimeout ? ` ⏱${sshTimeout}s` : "";
+			ctx.ui.setStatus("ssh-remote", `🔗 SSH: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}${timeoutInfo}`);
 		} else {
 			ctx.ui.setStatus("ssh-remote", undefined);
 		}
@@ -99,6 +108,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					remoteCwd = data.remoteCwd;
 					sshPort = data.port;
 					sshCommand = data.command;
+					sshTimeout = data.timeout;
 				}
 			}
 		}
@@ -187,9 +197,25 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		remoteToolsCache = null;
 	}
 
+	// Get effective timeout (CLI flag takes precedence over config)
+	function getEffectiveTimeout(): number | undefined {
+		const cliTimeout = pi.getFlag("ssh-timeout") as string | undefined;
+		if (cliTimeout) {
+			const parsed = parseInt(cliTimeout, 10);
+			if (!isNaN(parsed) && parsed > 0) {
+				return parsed;
+			}
+		}
+		if (sshTimeout && sshTimeout > 0) {
+			return sshTimeout;
+		}
+		return undefined;
+	}
+
 	// Register /ssh command to configure remote host
 	pi.registerCommand("ssh", {
-		description: "Configure SSH remote. Usage: /ssh user@host [cwd] | /ssh port <port> | /ssh command <cmd> | /ssh off",
+		description:
+			"Configure SSH remote. Usage: /ssh user@host [cwd] | /ssh port <port> | /ssh command <cmd> | /ssh timeout <seconds> | /ssh off",
 		handler: async (args, ctx) => {
 			const parts = args?.trim().split(/\s+/) || [];
 
@@ -199,7 +225,8 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					const portInfo = sshPort ? ` port: ${sshPort}` : "";
 					const cwdInfo = remoteCwd ? ` cwd: ${remoteCwd}` : "";
 					const cmdInfo = sshCommand ? ` command: ${sshCommand}` : "";
-					ctx.ui.notify(`SSH remote: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}`, "info");
+					const timeoutInfo = sshTimeout ? ` timeout: ${sshTimeout}s` : "";
+					ctx.ui.notify(`SSH remote: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}${timeoutInfo}`, "info");
 				} else {
 					ctx.ui.notify("SSH remote: disabled", "info");
 				}
@@ -211,6 +238,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				remoteCwd = null;
 				sshPort = null;
 				sshCommand = null;
+				sshTimeout = null;
 				invalidateToolsCache();
 				persistState();
 				updateStatus(ctx);
@@ -246,6 +274,27 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				persistState();
 				updateStatus(ctx);
 				ctx.ui.notify(`SSH command set to: ${sshCommand}`, "info");
+				return;
+			}
+
+			if (parts[0] === "timeout") {
+				if (parts.length < 2) {
+					if (sshTimeout) {
+						ctx.ui.notify(`SSH timeout: ${sshTimeout} seconds`, "info");
+					} else {
+						ctx.ui.notify("SSH timeout: not set (no default timeout)", "info");
+					}
+					return;
+				}
+				const timeout = parseInt(parts[1], 10);
+				if (isNaN(timeout) || timeout < 1) {
+					ctx.ui.notify("Invalid timeout number. Use: /ssh timeout <seconds>", "error");
+					return;
+				}
+				sshTimeout = timeout;
+				persistState();
+				updateStatus(ctx);
+				ctx.ui.notify(`SSH timeout set to: ${timeout} seconds`, "info");
 				return;
 			}
 
@@ -290,9 +339,11 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			try {
+				// Use tool-level timeout if provided, otherwise use default SSH timeout
+				const effectiveTimeout = timeout || getEffectiveTimeout();
 				const result = await pi.exec(fullCommand[0], fullCommand.slice(1), {
 					signal,
-					timeout: timeout ? timeout * 1000 : undefined,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
 				});
 
@@ -416,8 +467,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			const remoteCmd = buildRemoteCommand(cmd);
 
 			try {
+				const effectiveTimeout = getEffectiveTimeout();
 				const result = await pi.exec("ssh", [sshHost, remoteCmd], {
 					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
 				});
 
@@ -535,7 +588,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			try {
 				// Create parent directories
 				const mkdirCmd = buildRemoteCommand(`mkdir -p "$(dirname ${escapeForShell(path)})"`);
-				await pi.exec("ssh", [sshHost, mkdirCmd], { signal, cwd: ctx.cwd });
+				const effectiveTimeout = getEffectiveTimeout();
+				await pi.exec("ssh", [sshHost, mkdirCmd], {
+					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
+					cwd: ctx.cwd,
+				});
 
 				// Write chunks
 				for (let i = 0; i < chunks.length; i++) {
@@ -543,8 +601,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					const writeCmd = buildRemoteCommand(
 						`printf '%s' '${chunks[i]}' | base64 -d ${operator} ${escapeForShell(path)}`
 					);
+					const effectiveTimeout = getEffectiveTimeout();
 					const result = await pi.exec("ssh", [sshHost, writeCmd], {
 						signal,
+						timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 						cwd: ctx.cwd,
 					});
 
@@ -630,8 +690,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 			try {
 				// Read current content
+				const effectiveTimeout = getEffectiveTimeout();
 				const readResult = await pi.exec(readCmd[0], readCmd.slice(1), {
 					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
 				});
 
@@ -682,8 +744,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				let writeResult;
 				if (host) {
 					const writeCmd = buildRemoteCommand(`echo '${base64Content}' | base64 -d > ${escapeForShell(path)}`);
+					const effectiveTimeout = getEffectiveTimeout();
 					writeResult = await pi.exec("ssh", [host, writeCmd], {
 						signal,
+						timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 						cwd: ctx.cwd,
 					});
 				} else {
@@ -828,8 +892,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			try {
+				const effectiveTimeout = getEffectiveTimeout();
 				const result = await pi.exec(fullCommand[0], fullCommand.slice(1), {
 					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
 				});
 
@@ -922,8 +988,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			try {
+				const effectiveTimeout = getEffectiveTimeout();
 				const result = await pi.exec(fullCommand[0], fullCommand.slice(1), {
 					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
 				});
 
@@ -1001,8 +1069,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			try {
+				const effectiveTimeout = getEffectiveTimeout();
 				const result = await pi.exec(fullCommand[0], fullCommand.slice(1), {
 					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
 				});
 
@@ -1065,12 +1135,14 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		const cliCwd = pi.getFlag("ssh-cwd") as string | undefined;
 		const cliPort = pi.getFlag("ssh-port") as string | undefined;
 		const cliCommand = pi.getFlag("ssh-command") as string | undefined;
+		const cliTimeout = pi.getFlag("ssh-timeout") as string | undefined;
 
 		if (cliHost) {
 			sshHost = cliHost;
 			remoteCwd = cliCwd || null;
 			sshPort = cliPort ? parseInt(cliPort, 10) : null;
 			sshCommand = cliCommand || null;
+			sshTimeout = cliTimeout ? parseInt(cliTimeout, 10) : null;
 			invalidateToolsCache();
 			persistState();
 			updateStatus(ctx);
@@ -1078,9 +1150,18 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			const portInfo = sshPort ? `:${sshPort}` : "";
 			const cwdInfo = remoteCwd ? ` (${remoteCwd})` : "";
 			const cmdInfo = sshCommand ? ` via ${sshCommand}` : "";
-			ctx.ui.notify(`SSH remote configured via CLI: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}`, "info");
+			const timeoutInfo = sshTimeout ? ` timeout: ${sshTimeout}s` : "";
+			ctx.ui.notify(`SSH remote configured via CLI: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}${timeoutInfo}`, "info");
 		} else {
+			// Restore from session, but also check for CLI timeout flag
 			restoreFromBranch(ctx);
+
+			// Apply CLI timeout even if no CLI host is set
+			if (cliTimeout && !isNaN(parseInt(cliTimeout, 10))) {
+				sshTimeout = parseInt(cliTimeout, 10);
+				persistState();
+				updateStatus(ctx);
+			}
 		}
 	});
 
