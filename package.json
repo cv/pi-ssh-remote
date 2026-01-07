@@ -20,9 +20,11 @@
     "extensions": ["./ssh-remote.ts"]
   },
   "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test": "jest --testPathIgnorePatterns=e2e",
+    "test:watch": "jest --watch --testPathIgnorePatterns=e2e",
+    "test:coverage": "jest --coverage --testPathIgnorePatterns=e2e",
+    "test:e2e": "jest --testPathPattern=e2e --runInBand --testTimeout=120000",
+    "test:all": "npm run test && npm run test:e2e"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
