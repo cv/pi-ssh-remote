@@ -108,10 +108,10 @@ describe("ssh-remote extension", () => {
       const api = createMockExtensionAPI();
       extensionFn(api);
 
-      expect(api.registerFlag).toHaveBeenCalledWith("--ssh-host", expect.objectContaining({
+      expect(api.registerFlag).toHaveBeenCalledWith("ssh-host", expect.objectContaining({
         type: "string",
       }));
-      expect(api.registerFlag).toHaveBeenCalledWith("--ssh-cwd", expect.objectContaining({
+      expect(api.registerFlag).toHaveBeenCalledWith("ssh-cwd", expect.objectContaining({
         type: "string",
       }));
     });
@@ -124,7 +124,7 @@ describe("ssh-remote extension", () => {
       expect(api._registeredCommands.get("ssh").description).toContain("SSH remote host");
     });
 
-    it("should register all four tools", () => {
+    it("should register all seven tools", () => {
       const api = createMockExtensionAPI();
       extensionFn(api);
 
@@ -132,6 +132,9 @@ describe("ssh-remote extension", () => {
       expect(api._registeredTools.has("read")).toBe(true);
       expect(api._registeredTools.has("write")).toBe(true);
       expect(api._registeredTools.has("edit")).toBe(true);
+      expect(api._registeredTools.has("grep")).toBe(true);
+      expect(api._registeredTools.has("find")).toBe(true);
+      expect(api._registeredTools.has("ls")).toBe(true);
     });
 
     it("should register session lifecycle handlers", () => {
@@ -610,6 +613,285 @@ describe("ssh-remote extension", () => {
     });
   });
 
+  describe("grep tool", () => {
+    it("should execute grep locally when SSH is not configured", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "file.txt:1:matching line\n",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+      const ctx = createMockContext();
+      const grepTool = api._registeredTools.get("grep");
+
+      const result = await grepTool.execute(
+        "tool-1",
+        { pattern: "test" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(api.exec).toHaveBeenCalledWith(
+        "bash",
+        expect.arrayContaining(["-c"]),
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toContain("matching line");
+    });
+
+    it("should execute grep via SSH when configured", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "file.txt:1:remote match\n",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+
+      // Configure SSH via command
+      const sshCommand = api._registeredCommands.get("ssh");
+      const ctx = createMockContext();
+      await sshCommand.handler("user@remote.com /home/user", ctx);
+
+      const grepTool = api._registeredTools.get("grep");
+      const result = await grepTool.execute(
+        "tool-1",
+        { pattern: "test", ignoreCase: true },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(api.exec).toHaveBeenCalledWith(
+        "ssh",
+        expect.arrayContaining(["user@remote.com"]),
+        expect.any(Object)
+      );
+      expect(result.details.remote).toBe(true);
+    });
+
+    it("should return 'No matches found' when grep finds nothing", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "",
+        stderr: "",
+        code: 1,
+      });
+
+      extensionFn(api);
+      const ctx = createMockContext();
+      const grepTool = api._registeredTools.get("grep");
+
+      const result = await grepTool.execute(
+        "tool-1",
+        { pattern: "nonexistent" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.content[0].text).toBe("No matches found");
+    });
+  });
+
+  describe("find tool", () => {
+    it("should execute find locally when SSH is not configured", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "./src/file.ts\n./lib/other.ts\n",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+      const ctx = createMockContext();
+      const findTool = api._registeredTools.get("find");
+
+      const result = await findTool.execute(
+        "tool-1",
+        { pattern: "*.ts" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(api.exec).toHaveBeenCalledWith(
+        "bash",
+        expect.arrayContaining(["-c"]),
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toContain("file.ts");
+    });
+
+    it("should execute find via SSH when configured", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "./remote/file.txt\n",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+
+      // Configure SSH via command
+      const sshCommand = api._registeredCommands.get("ssh");
+      const ctx = createMockContext();
+      await sshCommand.handler("user@remote.com", ctx);
+
+      const findTool = api._registeredTools.get("find");
+      const result = await findTool.execute(
+        "tool-1",
+        { pattern: "*.txt", path: "/var" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(api.exec).toHaveBeenCalledWith(
+        "ssh",
+        expect.arrayContaining(["user@remote.com"]),
+        expect.any(Object)
+      );
+      expect(result.details.remote).toBe(true);
+    });
+
+    it("should return 'No files found' when find finds nothing", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+      const ctx = createMockContext();
+      const findTool = api._registeredTools.get("find");
+
+      const result = await findTool.execute(
+        "tool-1",
+        { pattern: "*.nonexistent" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.content[0].text).toBe("No files found matching pattern");
+    });
+  });
+
+  describe("ls tool", () => {
+    it("should execute ls locally when SSH is not configured", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "file1.txt\nfile2.txt\ndir1\n",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+      const ctx = createMockContext();
+      const lsTool = api._registeredTools.get("ls");
+
+      const result = await lsTool.execute(
+        "tool-1",
+        {},
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(api.exec).toHaveBeenCalledWith(
+        "bash",
+        expect.arrayContaining(["-c"]),
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toContain("file1.txt");
+    });
+
+    it("should execute ls via SSH when configured", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "remote_file.txt\n",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+
+      // Configure SSH via command
+      const sshCommand = api._registeredCommands.get("ssh");
+      const ctx = createMockContext();
+      await sshCommand.handler("user@remote.com /home", ctx);
+
+      const lsTool = api._registeredTools.get("ls");
+      const result = await lsTool.execute(
+        "tool-1",
+        { path: "/var/log" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(api.exec).toHaveBeenCalledWith(
+        "ssh",
+        expect.arrayContaining(["user@remote.com"]),
+        expect.any(Object)
+      );
+      expect(result.details.remote).toBe(true);
+    });
+
+    it("should return '(empty directory)' for empty directories", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "",
+        stderr: "",
+        code: 0,
+      });
+
+      extensionFn(api);
+      const ctx = createMockContext();
+      const lsTool = api._registeredTools.get("ls");
+
+      const result = await lsTool.execute(
+        "tool-1",
+        { path: "/empty" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.content[0].text).toBe("(empty directory)");
+    });
+
+    it("should handle ls errors", async () => {
+      const api = createMockExtensionAPI();
+      (api.exec as jest.Mock).mockResolvedValue({
+        stdout: "",
+        stderr: "No such file or directory",
+        code: 2,
+      });
+
+      extensionFn(api);
+      const ctx = createMockContext();
+      const lsTool = api._registeredTools.get("ls");
+
+      const result = await lsTool.execute(
+        "tool-1",
+        { path: "/nonexistent" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Error");
+    });
+  });
+
   describe("session state persistence", () => {
     it("should restore state from session on session_start", async () => {
       const api = createMockExtensionAPI();
@@ -645,8 +927,8 @@ describe("ssh-remote extension", () => {
       extensionFn(api);
 
       // Set CLI flag values after extension registers them but before session_start
-      api._registeredFlags.get("--ssh-host")!.value = "cli@host.com";
-      api._registeredFlags.get("--ssh-cwd")!.value = "/cli/path";
+      api._registeredFlags.get("ssh-host")!.value = "cli@host.com";
+      api._registeredFlags.get("ssh-cwd")!.value = "/cli/path";
 
       const ctx = createMockContext();
       (ctx.sessionManager.getBranch as jest.Mock).mockReturnValue([

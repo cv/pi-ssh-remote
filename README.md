@@ -32,9 +32,18 @@ pi -e /path/to/pi-ssh-remote/ssh-remote.ts
 
 ## Usage
 
+### Important: Disable conflicting built-in tools
+
+This extension registers tools named `bash`, `read`, `write`, `edit`, `grep`, `find`, and `ls` which conflict with pi's built-in tools of the same names. You must disable the built-in versions to avoid duplicate tool errors:
+
+```bash
+# Disable all built-in tools (extension provides SSH-wrapped versions)
+pi --tools '' -e ./ssh-remote.ts
+```
+
 ### Configure via command
 
-Once pi starts with the extension loaded:
+Once pi starts with the extension loaded, use the `/ssh` command:
 
 ```
 /ssh user@example.com              # Set remote host
@@ -45,18 +54,35 @@ Once pi starts with the extension loaded:
 
 ### Configure via CLI flags
 
+You can also configure the SSH remote directly from the command line:
+
 ```bash
-pi --ssh-host user@example.com
-pi --ssh-host user@example.com --ssh-cwd /path/to/project
+pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com
+pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-cwd /path/to/project
+```
+
+### Example session
+
+```bash
+# Start pi with the extension and SSH preconfigured
+pi --tools '' -e ./ssh-remote.ts --ssh-host myuser@myserver.com --ssh-cwd /home/myuser/project
+
+# Or start without SSH and configure later with /ssh command:
+pi --tools '' -e ./ssh-remote.ts
+# Then in pi:
+/ssh myuser@myserver.com /home/myuser/project
 ```
 
 ## Features
 
-- **Replaces built-in tools** with SSH-wrapped versions:
+- **Provides SSH-wrapped tools**:
   - `bash` - Executes commands on the remote host
   - `read` - Reads files from the remote host
   - `write` - Writes files to the remote host
   - `edit` - Edits files on the remote host
+  - `grep` - Searches file contents on the remote host
+  - `find` - Finds files by name pattern on the remote host
+  - `ls` - Lists directory contents on the remote host
 
 - **Session persistence** - Configuration persists across session reloads and branching
 
@@ -76,13 +102,14 @@ pi --ssh-host user@example.com --ssh-cwd /path/to/project
 
 ## How it works
 
-When SSH remote is configured, the extension intercepts all tool calls and wraps them with SSH:
+When SSH remote is configured, the extension wraps tool operations with SSH:
 
-| Local command | Remote equivalent |
-|---------------|-------------------|
-| `cat file.txt` | `ssh user@host 'cat file.txt'` |
-| `echo "content" > file.txt` | `ssh user@host 'echo "base64..." \| base64 -d > file.txt'` |
-| `ls -la` | `ssh user@host 'cd /remote/cwd && ls -la'` |
+| Tool | Remote execution |
+|------|------------------|
+| `bash` with `ls -la` | `ssh user@host 'cd /remote/cwd && ls -la'` |
+| `read` of `file.txt` | `ssh user@host 'cd /remote/cwd && cat file.txt'` |
+| `write` to `file.txt` | `ssh user@host 'cd /remote/cwd && printf ... \| base64 -d > file.txt'` |
+| `edit` of `file.txt` | Read via SSH, modify locally, write back via SSH |
 
 For write operations, content is base64-encoded to safely pass through the shell and handle binary data.
 
@@ -91,8 +118,10 @@ For write operations, content is base64-encoded to safely pass through the shell
 - **No image support for remote read** - Images cannot be displayed inline when reading from remote. The file will be read as text.
 - **No streaming for large outputs** - Output is collected and returned after command completes.
 - **SSH connection per command** - Each tool call establishes a new SSH connection. Consider using SSH connection multiplexing (`ControlMaster`) for better performance.
+- **Tool name conflicts** - Must disable all built-in tools using `--tools ''` flag.
+- **grep/find use basic commands** - The SSH-wrapped grep and find use standard Unix commands rather than ripgrep/fd, so some advanced features may differ from the built-in tools.
 
-### Recommended SSH config for performance
+## Recommended SSH config for performance
 
 Add to your `~/.ssh/config`:
 
@@ -112,6 +141,27 @@ mkdir -p ~/.ssh/sockets
 ```
 
 This keeps SSH connections open for 10 minutes, making subsequent commands much faster.
+
+## Troubleshooting
+
+### "Tool names must be unique" error
+
+This occurs when both the extension's tools and pi's built-in tools are loaded. Solution:
+
+```bash
+pi --tools '' -e ./ssh-remote.ts
+```
+
+### Model says it's in "READ-ONLY mode"
+
+The model may incorrectly assume it's read-only if the conversation context suggests limited tools. Simply instruct the model that it has write and edit capabilities, or start a fresh session.
+
+### SSH connection failures
+
+Ensure:
+1. You can SSH to the host manually: `ssh user@host`
+2. Key-based authentication is set up (password prompts won't work in non-interactive mode)
+3. The host alias (if using SSH config) is correctly configured
 
 ## License
 

@@ -29,12 +29,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	let remoteCwd: string | null = null;
 
 	// Register CLI flags for SSH configuration
-	pi.registerFlag("--ssh-host", {
+	pi.registerFlag("ssh-host", {
 		description: "SSH host to connect to (e.g., user@example.com)",
 		type: "string",
 	});
 
-	pi.registerFlag("--ssh-cwd", {
+	pi.registerFlag("ssh-cwd", {
 		description: "Remote working directory on the SSH host",
 		type: "string",
 	});
@@ -616,14 +616,274 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	});
 
 	// ============================================
+	// SSH-wrapped grep tool
+	// ============================================
+	pi.registerTool({
+		name: "grep",
+		label: "Grep (SSH)",
+		description: `Search file contents for a pattern. When SSH remote is configured, searches on the remote host. Returns matching lines with file paths and line numbers. Uses grep on remote.`,
+		parameters: Type.Object({
+			pattern: Type.String({ description: "Search pattern (regex or literal string)" }),
+			path: Type.Optional(Type.String({ description: "Directory or file to search (default: current directory)" })),
+			ignoreCase: Type.Optional(Type.Boolean({ description: "Case-insensitive search (default: false)" })),
+			literal: Type.Optional(Type.Boolean({ description: "Treat pattern as literal string instead of regex (default: false)" })),
+			context: Type.Optional(Type.Number({ description: "Number of lines to show before and after each match (default: 0)" })),
+			limit: Type.Optional(Type.Number({ description: "Maximum number of matches to return (default: 100)" })),
+		}),
+
+		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+			const { pattern, path: searchPath, ignoreCase, literal, context, limit } = params as {
+				pattern: string;
+				path?: string;
+				ignoreCase?: boolean;
+				literal?: boolean;
+				context?: number;
+				limit?: number;
+			};
+
+			const effectiveLimit = limit ?? 100;
+			const searchDir = searchPath || ".";
+
+			// Build grep command
+			let grepArgs = ["-r", "-n", "--color=never"];
+			if (ignoreCase) grepArgs.push("-i");
+			if (literal) grepArgs.push("-F");
+			if (context && context > 0) grepArgs.push(`-C${context}`);
+
+			// Escape pattern for shell
+			const escapedPattern = escapeForShell(pattern);
+			const cmd = `grep ${grepArgs.join(" ")} ${escapedPattern} ${escapeForShell(searchDir)} 2>/dev/null | head -n ${effectiveLimit}`;
+
+			let fullCommand: string[];
+			if (sshHost) {
+				const remoteCmd = buildRemoteCommand(cmd);
+				fullCommand = ["ssh", sshHost, remoteCmd];
+			} else {
+				fullCommand = ["bash", "-c", cmd];
+			}
+
+			try {
+				const result = await pi.exec(fullCommand[0], fullCommand.slice(1), {
+					signal,
+					cwd: ctx.cwd,
+				});
+
+				const output = result.stdout.trim();
+
+				if (!output) {
+					return {
+						content: [{ type: "text", text: "No matches found" }],
+						details: { remote: !!sshHost },
+					};
+				}
+
+				// Apply truncation
+				const truncation = truncateTail(output, {
+					maxLines: DEFAULT_MAX_LINES,
+					maxBytes: DEFAULT_MAX_BYTES,
+				});
+
+				let resultText = truncation.content;
+				if (truncation.truncated) {
+					resultText += `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines]`;
+				}
+
+				return {
+					content: [{ type: "text", text: resultText }],
+					details: { remote: !!sshHost, host: sshHost },
+				};
+			} catch (err: any) {
+				return {
+					content: [{ type: "text", text: `Error: ${err.message}` }],
+					details: { error: err.message, remote: !!sshHost },
+					isError: true,
+				};
+			}
+		},
+
+		renderCall(args, theme) {
+			const pattern = (args as { pattern?: string }).pattern || "";
+			const prefix = sshHost ? theme.fg("accent", `[${sshHost}] `) : "";
+			return new Text(prefix + theme.fg("muted", `grep ${pattern}`), 0, 0);
+		},
+	});
+
+	// ============================================
+	// SSH-wrapped find tool
+	// ============================================
+	pi.registerTool({
+		name: "find",
+		label: "Find (SSH)",
+		description: `Search for files by name pattern. When SSH remote is configured, searches on the remote host. Returns matching file paths.`,
+		parameters: Type.Object({
+			pattern: Type.String({ description: "File name pattern (glob-style, e.g. '*.ts', '*.json')" }),
+			path: Type.Optional(Type.String({ description: "Directory to search in (default: current directory)" })),
+			limit: Type.Optional(Type.Number({ description: "Maximum number of results (default: 1000)" })),
+		}),
+
+		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+			const { pattern, path: searchPath, limit } = params as {
+				pattern: string;
+				path?: string;
+				limit?: number;
+			};
+
+			const effectiveLimit = limit ?? 1000;
+			const searchDir = searchPath || ".";
+
+			// Build find command - use find with -name for glob patterns
+			const cmd = `find ${escapeForShell(searchDir)} -name ${escapeForShell(pattern)} 2>/dev/null | head -n ${effectiveLimit}`;
+
+			let fullCommand: string[];
+			if (sshHost) {
+				const remoteCmd = buildRemoteCommand(cmd);
+				fullCommand = ["ssh", sshHost, remoteCmd];
+			} else {
+				fullCommand = ["bash", "-c", cmd];
+			}
+
+			try {
+				const result = await pi.exec(fullCommand[0], fullCommand.slice(1), {
+					signal,
+					cwd: ctx.cwd,
+				});
+
+				const output = result.stdout.trim();
+
+				if (!output) {
+					return {
+						content: [{ type: "text", text: "No files found matching pattern" }],
+						details: { remote: !!sshHost },
+					};
+				}
+
+				// Apply truncation
+				const truncation = truncateTail(output, {
+					maxLines: DEFAULT_MAX_LINES,
+					maxBytes: DEFAULT_MAX_BYTES,
+				});
+
+				let resultText = truncation.content;
+				if (truncation.truncated) {
+					resultText += `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines]`;
+				}
+
+				return {
+					content: [{ type: "text", text: resultText }],
+					details: { remote: !!sshHost, host: sshHost },
+				};
+			} catch (err: any) {
+				return {
+					content: [{ type: "text", text: `Error: ${err.message}` }],
+					details: { error: err.message, remote: !!sshHost },
+					isError: true,
+				};
+			}
+		},
+
+		renderCall(args, theme) {
+			const pattern = (args as { pattern?: string }).pattern || "";
+			const prefix = sshHost ? theme.fg("accent", `[${sshHost}] `) : "";
+			return new Text(prefix + theme.fg("muted", `find ${pattern}`), 0, 0);
+		},
+	});
+
+	// ============================================
+	// SSH-wrapped ls tool
+	// ============================================
+	pi.registerTool({
+		name: "ls",
+		label: "List (SSH)",
+		description: `List directory contents. When SSH remote is configured, lists on the remote host. Returns entries sorted alphabetically with '/' suffix for directories.`,
+		parameters: Type.Object({
+			path: Type.Optional(Type.String({ description: "Directory to list (default: current directory)" })),
+			limit: Type.Optional(Type.Number({ description: "Maximum number of entries to return (default: 500)" })),
+		}),
+
+		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+			const { path: listPath, limit } = params as {
+				path?: string;
+				limit?: number;
+			};
+
+			const effectiveLimit = limit ?? 500;
+			const dir = listPath || ".";
+
+			// Build ls command - use ls -1a for simple output, then add / for directories
+			// Using a script that marks directories with /
+			const cmd = `ls -1a ${escapeForShell(dir)} 2>/dev/null | head -n ${effectiveLimit}`;
+
+			let fullCommand: string[];
+			if (sshHost) {
+				const remoteCmd = buildRemoteCommand(cmd);
+				fullCommand = ["ssh", sshHost, remoteCmd];
+			} else {
+				fullCommand = ["bash", "-c", cmd];
+			}
+
+			try {
+				const result = await pi.exec(fullCommand[0], fullCommand.slice(1), {
+					signal,
+					cwd: ctx.cwd,
+				});
+
+				if (result.code !== 0) {
+					return {
+						content: [{ type: "text", text: `Error: ${result.stderr || "Directory not found"}` }],
+						details: { remote: !!sshHost },
+						isError: true,
+					};
+				}
+
+				const output = result.stdout.trim();
+
+				if (!output) {
+					return {
+						content: [{ type: "text", text: "(empty directory)" }],
+						details: { remote: !!sshHost },
+					};
+				}
+
+				// Apply truncation
+				const truncation = truncateTail(output, {
+					maxLines: DEFAULT_MAX_LINES,
+					maxBytes: DEFAULT_MAX_BYTES,
+				});
+
+				let resultText = truncation.content;
+				if (truncation.truncated) {
+					resultText += `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines]`;
+				}
+
+				return {
+					content: [{ type: "text", text: resultText }],
+					details: { remote: !!sshHost, host: sshHost },
+				};
+			} catch (err: any) {
+				return {
+					content: [{ type: "text", text: `Error: ${err.message}` }],
+					details: { error: err.message, remote: !!sshHost },
+					isError: true,
+				};
+			}
+		},
+
+		renderCall(args, theme) {
+			const path = (args as { path?: string }).path || ".";
+			const prefix = sshHost ? theme.fg("accent", `[${sshHost}] `) : "";
+			return new Text(prefix + theme.fg("muted", `ls ${path}`), 0, 0);
+		},
+	});
+
+	// ============================================
 	// Session lifecycle handlers
 	// ============================================
 
 	// Restore state on session start
 	pi.on("session_start", async (_event, ctx) => {
 		// Check for CLI flags first (they take precedence over session state)
-		const cliHost = pi.getFlag("--ssh-host") as string | undefined;
-		const cliCwd = pi.getFlag("--ssh-cwd") as string | undefined;
+		const cliHost = pi.getFlag("ssh-host") as string | undefined;
+		const cliCwd = pi.getFlag("ssh-cwd") as string | undefined;
 
 		if (cliHost) {
 			sshHost = cliHost;
