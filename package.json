@@ -14,7 +14,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cvillela/pi-ssh-remote"
+    "url": "https://github.com/cv/pi-ssh-remote"
   },
   "pi": {
     "extensions": ["./ssh-remote.ts"]

@@ -8,10 +8,10 @@ A [pi coding agent](https://github.com/badlogic/pi-mono) extension that redirect
 
 ```bash
 # Global installation (all projects)
-git clone https://github.com/cvillela/pi-ssh-remote ~/.pi/agent/extensions/pi-ssh-remote
+git clone https://github.com/cv/pi-ssh-remote ~/.pi/agent/extensions/pi-ssh-remote
 
 # Or project-local installation
-git clone https://github.com/cvillela/pi-ssh-remote .pi/extensions/pi-ssh-remote
+git clone https://github.com/cv/pi-ssh-remote .pi/extensions/pi-ssh-remote
 ```
 
 ### Option 2: Add to settings.json

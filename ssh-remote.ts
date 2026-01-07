@@ -4,7 +4,7 @@
  * Redirects all file operations and commands to a remote host via SSH.
  * See README.md for installation and usage instructions.
  *
- * @see https://github.com/cvillela/pi-ssh-remote
+ * @see https://github.com/cv/pi-ssh-remote
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
