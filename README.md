@@ -27,7 +27,7 @@ Clone the repository anywhere, then add the path to your `~/.pi/agent/settings.j
 ### Option 3: Load manually with CLI flag
 
 ```bash
-pi -e /path/to/pi-ssh-remote/ssh-remote.ts
+pi -e /path/to/pi-ssh-remote
 ```
 
 ## Usage
@@ -38,7 +38,7 @@ This extension registers tools named `bash`, `read`, `write`, `edit`, `grep`, `f
 
 ```bash
 # Disable all built-in tools (extension provides SSH-wrapped versions)
-pi --tools '' -e ./ssh-remote.ts
+pi --tools '' -e /path/to/pi-ssh-remote
 ```
 
 ### Configure via command
@@ -61,27 +61,27 @@ Once pi starts with the extension loaded, use the `/ssh` command:
 You can also configure the SSH remote directly from the command line:
 
 ```bash
-pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com
-pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-cwd /path/to/project
-pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-port 2222
-pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-command "tsh ssh"
-pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-timeout 60
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host user@example.com
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host user@example.com --ssh-cwd /path/to/project
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host user@example.com --ssh-port 2222
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host user@example.com --ssh-command "tsh ssh"
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host user@example.com --ssh-timeout 60
 ```
 
 ### Example session
 
 ```bash
 # Start pi with the extension and SSH preconfigured
-pi --tools '' -e ./ssh-remote.ts --ssh-host myuser@myserver.com --ssh-cwd /home/myuser/project
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host myuser@myserver.com --ssh-cwd /home/myuser/project
 
 # With custom port:
-pi --tools '' -e ./ssh-remote.ts --ssh-host myuser@myserver.com --ssh-port 2222
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host myuser@myserver.com --ssh-port 2222
 
 # With Teleport:
-pi --tools '' -e ./ssh-remote.ts --ssh-host myuser@myserver.com --ssh-command "tsh ssh"
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host myuser@myserver.com --ssh-command "tsh ssh"
 
 # Or start without SSH and configure later with /ssh command:
-pi --tools '' -e ./ssh-remote.ts
+pi --tools '' -e /path/to/pi-ssh-remote
 # Then in pi:
 /ssh myuser@myserver.com /home/myuser/project
 /ssh port 2222
@@ -101,7 +101,7 @@ This creates SSH host aliases like `cs.my-codespace-name.main` that you can use 
 
 ```bash
 # Use the generated host alias with pi-ssh-remote
-pi --tools '' -e ./ssh-remote.ts --ssh-host cs.my-codespace-name.main --ssh-cwd /workspaces/my-project
+pi --tools '' -e /path/to/pi-ssh-remote --ssh-host cs.my-codespace-name.main --ssh-cwd /workspaces/my-project
 ```
 
 The generated config includes `ControlMaster auto` for SSH connection multiplexing, making repeated commands fast.
@@ -189,7 +189,7 @@ This keeps SSH connections open for 10 minutes, making subsequent commands much 
 This occurs when both the extension's tools and pi's built-in tools are loaded. Solution:
 
 ```bash
-pi --tools '' -e ./ssh-remote.ts
+pi --tools '' -e /path/to/pi-ssh-remote
 ```
 
 ### Model says it's in "READ-ONLY mode"

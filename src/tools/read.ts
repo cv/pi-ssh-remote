@@ -11,7 +11,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { SSHState } from "../types";
+import type { SSHState, ToolResultWithError } from "../types";
 
 export function registerReadTool(state: SSHState): void {
 	state.pi.registerTool({
@@ -99,6 +99,37 @@ export function registerReadTool(state: SSHState): void {
 			const host = state.getHost();
 			const prefix = host ? theme.fg("accent", `[${host}] `) : "";
 			return new Text(prefix + theme.fg("muted", `read ${path}`), 0, 0);
+		},
+
+		renderResult(result, { isPartial }, theme) {
+			if (isPartial) {
+				return new Text(theme.fg("warning", "Reading..."), 0, 0);
+			}
+
+			const details = result.details as
+				| { path?: string; error?: string; remote?: boolean; truncation?: object }
+				| undefined;
+			const typedResult = result as ToolResultWithError;
+
+			if (details?.error || typedResult.isError) {
+				const content = result.content[0];
+				const text = content?.type === "text" ? content.text : "Error";
+				return new Text(theme.fg("error", text), 0, 0);
+			}
+
+			const prefix = details?.remote ? theme.fg("accent", "[remote] ") : "";
+			const content = result.content[0];
+			const text = content?.type === "text" ? content.text : "";
+
+			// Show first few lines of content
+			const lines = text.split("\n").slice(0, 10);
+			let display = lines.join("\n");
+			if (text.split("\n").length > 10) {
+				display += `\n${theme.fg("dim", "...")}`;
+			}
+
+			const truncateInfo = details?.truncation ? theme.fg("warning", " [truncated]") : "";
+			return new Text(prefix + display + truncateInfo, 0, 0);
 		},
 	});
 }

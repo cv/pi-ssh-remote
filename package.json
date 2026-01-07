@@ -1,6 +1,6 @@
 {
 	"name": "pi-ssh-remote",
-	"version": "0.0.8",
+	"version": "0.0.9",
 	"description": "Pi extension that redirects all file operations and commands to a remote host via SSH",
 	"keywords": [
 		"pi",
