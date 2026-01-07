@@ -1,0 +1,25 @@
+{
+  "name": "pi-ssh-remote",
+  "version": "1.0.0",
+  "description": "Pi extension that redirects all file operations and commands to a remote host via SSH",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "ssh",
+    "remote",
+    "development"
+  ],
+  "author": "Carlos Villela",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cvillela/pi-ssh-remote"
+  },
+  "pi": {
+    "extensions": ["./ssh-remote.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.1.0"
+  }
+}
