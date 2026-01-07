@@ -215,7 +215,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	// Register /ssh command to configure remote host
 	pi.registerCommand("ssh", {
 		description:
-			"Configure SSH remote. Usage: /ssh user@host [cwd] | /ssh port <port> | /ssh command <cmd> | /ssh timeout <seconds> | /ssh off",
+			"Configure SSH remote. Usage: /ssh user@host [cwd] | /ssh port <port> | /ssh command <cmd> | /ssh cwd <path> | /ssh timeout <seconds> | /ssh off",
 		handler: async (args, ctx) => {
 			const parts = args?.trim().split(/\s+/) || [];
 
@@ -295,6 +295,23 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				persistState();
 				updateStatus(ctx);
 				ctx.ui.notify(`SSH timeout set to: ${timeout} seconds`, "info");
+				return;
+			}
+
+			if (parts[0] === "cwd") {
+				if (parts.length < 2) {
+					if (remoteCwd) {
+						ctx.ui.notify(`SSH working directory: ${remoteCwd}`, "info");
+					} else {
+						ctx.ui.notify("SSH working directory: not set", "info");
+					}
+					return;
+				}
+				// Join remaining parts as the path (in case of spaces, though unlikely)
+				remoteCwd = parts.slice(1).join(" ");
+				persistState();
+				updateStatus(ctx);
+				ctx.ui.notify(`SSH working directory set to: ${remoteCwd}`, "info");
 				return;
 			}
 
@@ -465,10 +482,11 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			const remoteCmd = buildRemoteCommand(cmd);
+			const prefix = sshPrefix();
 
 			try {
 				const effectiveTimeout = getEffectiveTimeout();
-				const result = await pi.exec("ssh", [sshHost, remoteCmd], {
+				const result = await pi.exec(prefix[0], [...prefix.slice(1), remoteCmd], {
 					signal,
 					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
@@ -585,11 +603,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			// Remote write via SSH using base64 encoding with chunking
+			const prefix = sshPrefix();
 			try {
 				// Create parent directories
 				const mkdirCmd = buildRemoteCommand(`mkdir -p "$(dirname ${escapeForShell(path)})"`);
 				const effectiveTimeout = getEffectiveTimeout();
-				await pi.exec("ssh", [sshHost, mkdirCmd], {
+				await pi.exec(prefix[0], [...prefix.slice(1), mkdirCmd], {
 					signal,
 					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 					cwd: ctx.cwd,
@@ -602,7 +621,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						`printf '%s' '${chunks[i]}' | base64 -d ${operator} ${escapeForShell(path)}`
 					);
 					const effectiveTimeout = getEffectiveTimeout();
-					const result = await pi.exec("ssh", [sshHost, writeCmd], {
+					const result = await pi.exec(prefix[0], [...prefix.slice(1), writeCmd], {
 						signal,
 						timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 						cwd: ctx.cwd,
@@ -679,11 +698,11 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			// 4. Write the file back
 
 			let readCmd: string[];
-			const host = sshHost;
 
-			if (host) {
+			if (sshHost) {
+				const prefix = sshPrefix();
 				const remoteCmd = buildRemoteCommand(`cat ${escapeForShell(path)}`);
-				readCmd = ["ssh", host, remoteCmd];
+				readCmd = [...prefix, remoteCmd];
 			} else {
 				readCmd = ["cat", path];
 			}
@@ -700,7 +719,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (readResult.code !== 0) {
 					return {
 						content: [{ type: "text", text: `Error reading file: ${readResult.stderr}` }],
-						details: { path, remote: !!host },
+						details: { path, remote: !!sshHost },
 						isError: true,
 					};
 				}
@@ -718,7 +737,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 								text: `Error: oldText not found in file. Make sure it matches exactly (including whitespace).`,
 							},
 						],
-						details: { path, remote: !!host },
+						details: { path, remote: !!sshHost },
 						isError: true,
 					};
 				}
@@ -731,7 +750,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 								text: `Error: oldText appears ${occurrences} times in file. It must appear exactly once for safe replacement.`,
 							},
 						],
-						details: { path, occurrences, remote: !!host },
+						details: { path, occurrences, remote: !!sshHost },
 						isError: true,
 					};
 				}
@@ -742,10 +761,11 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				// Write back using base64 encoding
 				const base64Content = Buffer.from(newContent).toString("base64");
 				let writeResult;
-				if (host) {
+				if (sshHost) {
+					const prefix = sshPrefix();
 					const writeCmd = buildRemoteCommand(`echo '${base64Content}' | base64 -d > ${escapeForShell(path)}`);
 					const effectiveTimeout = getEffectiveTimeout();
-					writeResult = await pi.exec("ssh", [host, writeCmd], {
+					writeResult = await pi.exec(prefix[0], [...prefix.slice(1), writeCmd], {
 						signal,
 						timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
 						cwd: ctx.cwd,
@@ -760,7 +780,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (writeResult.code !== 0) {
 					return {
 						content: [{ type: "text", text: `Error writing file: ${writeResult.stderr}` }],
-						details: { path, remote: !!host },
+						details: { path, remote: !!sshHost },
 						isError: true,
 					};
 				}
@@ -778,14 +798,14 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						oldTextLength: oldText.length,
 						newTextLength: newText.length,
 						lineDelta,
-						remote: !!host,
-						host,
+						remote: !!sshHost,
+						host: sshHost,
 					},
 				};
 			} catch (err: unknown) {
 				return {
 					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
-					details: { path, error: getErrorMessage(err), remote: !!host },
+					details: { path, error: getErrorMessage(err), remote: !!sshHost },
 					isError: true,
 				};
 			}
@@ -1063,7 +1083,8 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			let fullCommand: string[];
 			if (sshHost) {
 				const remoteCmd = buildRemoteCommand(cmd);
-				fullCommand = ["ssh", sshHost, remoteCmd];
+				const prefix = sshPrefix();
+				fullCommand = [...prefix, remoteCmd];
 			} else {
 				fullCommand = ["bash", "-c", cmd];
 			}

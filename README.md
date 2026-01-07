@@ -50,6 +50,7 @@ Once pi starts with the extension loaded, use the `/ssh` command:
 /ssh user@example.com /path/to/dir # Set remote host + working directory
 /ssh port 2222                     # Set custom port
 /ssh command tsh ssh               # Set custom SSH command (e.g., Teleport)
+/ssh cwd /path/to/dir              # Set remote working directory
 /ssh timeout 60                    # Set timeout for SSH operations (seconds)
 /ssh                               # Show current configuration
 /ssh off                           # Disable remote mode
@@ -86,6 +87,24 @@ pi --tools '' -e ./ssh-remote.ts
 /ssh port 2222
 /ssh timeout 30                    # Set 30-second timeout for SSH operations
 ```
+
+### Using with GitHub Codespaces
+
+GitHub Codespaces can be accessed via SSH by generating an SSH config:
+
+```bash
+# Generate SSH config for your codespaces (one-time setup)
+gh cs ssh --config >> ~/.ssh/config
+```
+
+This creates SSH host aliases like `cs.my-codespace-name.main` that you can use directly:
+
+```bash
+# Use the generated host alias with pi-ssh-remote
+pi --tools '' -e ./ssh-remote.ts --ssh-host cs.my-codespace-name.main --ssh-cwd /workspaces/my-project
+```
+
+The generated config includes `ControlMaster auto` for SSH connection multiplexing, making repeated commands fast.
 
 ## Features
 

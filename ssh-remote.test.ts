@@ -381,6 +381,43 @@ describe("ssh-remote extension", () => {
 
 			expect(ctx.ui.notify).toHaveBeenCalledWith("SSH timeout: 90 seconds", "info");
 		});
+
+		it("should set SSH cwd with 'cwd' subcommand", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			await sshCommand.handler("cwd /workspaces/myproject", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("SSH working directory set to: /workspaces/myproject", "info");
+			expect(api.appendEntry).toHaveBeenCalledWith(
+				"ssh-remote-config",
+				expect.objectContaining({
+					remoteCwd: "/workspaces/myproject",
+				})
+			);
+		});
+
+		it("should show current cwd when cwd command called without args", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			// Set cwd first
+			await sshCommand.handler("cwd /workspaces/myproject", ctx);
+
+			// Clear previous calls
+			(ctx.ui.notify as jest.Mock).mockClear();
+
+			// Query current cwd
+			await sshCommand.handler("cwd", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("SSH working directory: /workspaces/myproject", "info");
+		});
 	});
 
 	describe("bash tool", () => {
