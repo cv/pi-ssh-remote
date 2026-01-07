@@ -127,7 +127,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			updateStatus(ctx);
 
 			const cwdInfo = remoteCwd ? ` with cwd: ${remoteCwd}` : "";
-			ctx.ui.notify(`SSH remote set to: ${sshHost}${cwdInfo}`, "success");
+			ctx.ui.notify(`SSH remote set to: ${sshHost}${cwdInfo}`, "info");
 		},
 	});
 
@@ -259,6 +259,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (result.code !== 0) {
 					return {
 						content: [{ type: "text", text: `Error reading file: ${result.stderr}` }],
+						details: { path, remote: false, error: result.stderr },
 						isError: true,
 					};
 				}
@@ -382,6 +383,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						if (result.code !== 0) {
 							return {
 								content: [{ type: "text", text: `Error writing file: ${result.stderr}` }],
+								details: { path, remote: false, error: result.stderr },
 								isError: true,
 							};
 						}
@@ -451,8 +453,9 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			const details = result.details as { bytes?: number; error?: string; remote?: boolean } | undefined;
+			const resultAny = result as any;
 
-			if (details?.error || result.isError) {
+			if (details?.error || resultAny.isError) {
 				const content = result.content[0];
 				const text = content?.type === "text" ? content.text : "Error";
 				return new Text(theme.fg("error", text), 0, 0);
@@ -597,8 +600,9 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			const details = result.details as { lineDelta?: number; error?: string; remote?: boolean } | undefined;
+			const resultAny = result as any;
 
-			if (details?.error || result.isError) {
+			if (details?.error || resultAny.isError) {
 				const content = result.content[0];
 				const text = content?.type === "text" ? content.text : "Error";
 				return new Text(theme.fg("error", text), 0, 0);

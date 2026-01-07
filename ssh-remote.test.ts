@@ -1,0 +1,1358 @@
+/**
+ * Tests for pi-ssh-remote extension
+ *
+ * These tests verify the core functionality of the SSH remote extension
+ * by mocking the pi ExtensionAPI and simulating tool executions.
+ */
+
+// We need to extract and test the helper functions and tool logic
+// Since the extension exports a single function, we'll test it through mocks
+
+describe("ssh-remote extension", () => {
+  // Mock factories
+  const createMockUI = () => ({
+    notify: jest.fn(),
+    setStatus: jest.fn(),
+    confirm: jest.fn(),
+    select: jest.fn(),
+    input: jest.fn(),
+    editor: jest.fn(),
+    custom: jest.fn(),
+    setWidget: jest.fn(),
+    setFooter: jest.fn(),
+    setHeader: jest.fn(),
+    setTitle: jest.fn(),
+    setEditorText: jest.fn(),
+    getEditorText: jest.fn(),
+  });
+
+  const createMockSessionManager = () => ({
+    getBranch: jest.fn(() => []),
+    getEntries: jest.fn(() => []),
+    getLeafId: jest.fn(() => "leaf-1"),
+    getLeafEntry: jest.fn(() => null),
+    getSessionFile: jest.fn(() => null),
+  });
+
+  const createMockContext = () => ({
+    ui: createMockUI(),
+    hasUI: true,
+    cwd: "/test/cwd",
+    sessionManager: createMockSessionManager(),
+    modelRegistry: {},
+    model: {},
+    isIdle: jest.fn(() => true),
+    abort: jest.fn(),
+    hasPendingMessages: jest.fn(() => false),
+  });
+
+  const createMockExtensionAPI = () => {
+    const registeredTools: Map<string, any> = new Map();
+    const registeredCommands: Map<string, any> = new Map();
+    const registeredFlags: Map<string, any> = new Map();
+    const eventHandlers: Map<string, Function[]> = new Map();
+    const appendedEntries: any[] = [];
+    let execMock = jest.fn();
+
+    const api = {
+      registerTool: jest.fn((tool: any) => {
+        registeredTools.set(tool.name, tool);
+      }),
+      registerCommand: jest.fn((name: string, options: any) => {
+        registeredCommands.set(name, options);
+      }),
+      registerFlag: jest.fn((name: string, options: any) => {
+        registeredFlags.set(name, { ...options, value: undefined });
+      }),
+      registerShortcut: jest.fn(),
+      registerMessageRenderer: jest.fn(),
+      on: jest.fn((event: string, handler: Function) => {
+        if (!eventHandlers.has(event)) {
+          eventHandlers.set(event, []);
+        }
+        eventHandlers.get(event)!.push(handler);
+      }),
+      appendEntry: jest.fn((customType: string, data: any) => {
+        appendedEntries.push({ customType, data });
+      }),
+      exec: jest.fn((...args: any[]) => execMock(...args)),
+      getFlag: jest.fn((name: string) => registeredFlags.get(name)?.value),
+      setActiveTools: jest.fn(),
+      getActiveTools: jest.fn(() => ["read", "bash", "edit", "write"]),
+      getAllTools: jest.fn(() => ["read", "bash", "edit", "write"]),
+      sendMessage: jest.fn(),
+      sendUserMessage: jest.fn(),
+      events: {
+        on: jest.fn(),
+        emit: jest.fn(),
+        off: jest.fn(),
+      },
+      _registeredTools: registeredTools,
+      _registeredCommands: registeredCommands,
+      _registeredFlags: registeredFlags,
+      _eventHandlers: eventHandlers,
+      _appendedEntries: appendedEntries,
+      _setExecMock: (mock: jest.Mock) => { execMock = mock; },
+    };
+
+    return api;
+  };
+
+  // Import extension synchronously since ts-jest handles it
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const extensionModule = require("./ssh-remote");
+  const extensionFn = extensionModule.default;
+
+  describe("initialization", () => {
+    it("should register CLI flags", () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      expect(api.registerFlag).toHaveBeenCalledWith("--ssh-host", expect.objectContaining({
+        type: "string",
+      }));
+      expect(api.registerFlag).toHaveBeenCalledWith("--ssh-cwd", expect.objectContaining({
+        type: "string",
+      }));
+    });
+
+    it("should register /ssh command", () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      expect(api._registeredCommands.has("ssh")).toBe(true);
+      expect(api._registeredCommands.get("ssh").description).toContain("SSH remote host");
+    });
+
+    it("should register all four tools", () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      expect(api._registeredTools.has("bash")).toBe(true);
+      expect(api._registeredTools.has("read")).toBe(true);
+      expect(api._registeredTools.has("write")).toBe(true);
+      expect(api._registeredTools.has("edit")).toBe(true);
+    });
+
+    it("should register session lifecycle handlers", () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      expect(api._eventHandlers.has("session_start")).toBe(true);
+      expect(api._eventHandlers.has("session_tree")).toBe(true);
+      expect(api._eventHandlers.has("session_branch")).toBe(true);
+    });
+  });
+
+  describe("/ssh command", () => {
+    it("should show current config when called without args", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      await sshCommand.handler("", ctx);
+      expect(ctx.ui.notify).toHaveBeenCalledWith("SSH remote: disabled", "info");
+    });
+
+    it("should set SSH host when provided", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      await sshCommand.handler("user@example.com", ctx);
+      
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        "SSH remote set to: user@example.com",
+        "info"
+      );
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "ssh-remote",
+        expect.stringContaining("user@example.com")
+      );
+      expect(api.appendEntry).toHaveBeenCalledWith("ssh-remote-config", {
+        host: "user@example.com",
+        remoteCwd: null,
+      });
+    });
+
+    it("should set SSH host and remote cwd when both provided", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      await sshCommand.handler("user@example.com /home/user/project", ctx);
+      
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        "SSH remote set to: user@example.com with cwd: /home/user/project",
+        "info"
+      );
+      expect(api.appendEntry).toHaveBeenCalledWith("ssh-remote-config", {
+        host: "user@example.com",
+        remoteCwd: "/home/user/project",
+      });
+    });
+
+    it("should disable SSH remote with 'off' command", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      // First enable
+      await sshCommand.handler("user@example.com", ctx);
+      
+      // Then disable
+      await sshCommand.handler("off", ctx);
+
+      expect(ctx.ui.notify).toHaveBeenLastCalledWith("SSH remote disabled", "info");
+      expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("ssh-remote", undefined);
+    });
+  });
+
+  describe("bash tool", () => {
+    it("should execute locally when no SSH host configured", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "hello world",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const bashTool = api._registeredTools.get("bash");
+
+      const result = await bashTool.execute(
+        "tool-1",
+        { command: "echo hello" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "bash",
+        ["-c", "echo hello"],
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toBe("hello world");
+      expect(result.details.remote).toBe(false);
+    });
+
+    it("should execute via SSH when host is configured", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "remote output",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const bashTool = api._registeredTools.get("bash");
+      const result = await bashTool.execute(
+        "tool-1",
+        { command: "ls -la" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        ["user@server.com", "ls -la"],
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toBe("remote output");
+      expect(result.details.remote).toBe(true);
+      expect(result.details.host).toBe("user@server.com");
+    });
+
+    it("should prepend cd command when remoteCwd is set", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "output",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH with cwd
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com /home/user/project", ctx);
+
+      const bashTool = api._registeredTools.get("bash");
+      await bashTool.execute(
+        "tool-1",
+        { command: "pwd" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        ["user@server.com", "cd '/home/user/project' && pwd"],
+        expect.any(Object)
+      );
+    });
+
+    it("should include exit code in output for non-zero exit", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "",
+        stderr: "command not found",
+        code: 127,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const bashTool = api._registeredTools.get("bash");
+
+      const result = await bashTool.execute(
+        "tool-1",
+        { command: "nonexistent" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.content[0].text).toContain("[Exit code: 127]");
+      expect(result.details.exitCode).toBe(127);
+    });
+  });
+
+  describe("read tool", () => {
+    it("should read file locally when no SSH host configured", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "file content here",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const readTool = api._registeredTools.get("read");
+
+      const result = await readTool.execute(
+        "tool-1",
+        { path: "test.txt" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "cat",
+        ["test.txt"],
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toBe("file content here");
+    });
+
+    it("should read file via SSH when host is configured", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "remote file content",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const readTool = api._registeredTools.get("read");
+      const result = await readTool.execute(
+        "tool-1",
+        { path: "test.txt" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        ["user@server.com", "cat 'test.txt'"],
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toBe("remote file content");
+      expect(result.details.remote).toBe(true);
+    });
+
+    it("should handle offset and limit parameters", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "line 10\nline 11\nline 12",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const readTool = api._registeredTools.get("read");
+      await readTool.execute(
+        "tool-1",
+        { path: "test.txt", offset: 10, limit: 3 },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        ["user@server.com", "sed -n '10,12p' 'test.txt'"],
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe("write tool", () => {
+    it("should write file locally when no SSH host configured", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const writeTool = api._registeredTools.get("write");
+
+      const content = "hello world";
+      const result = await writeTool.execute(
+        "tool-1",
+        { path: "test.txt", content },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      // Should create directory first
+      expect(execMock).toHaveBeenCalledWith(
+        "bash",
+        ["-c", expect.stringContaining("mkdir -p")],
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toContain("Successfully wrote");
+      expect(result.details.bytes).toBe(content.length);
+    });
+
+    it("should write file via SSH with base64 encoding", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const writeTool = api._registeredTools.get("write");
+      const content = "hello world";
+      const result = await writeTool.execute(
+        "tool-1",
+        { path: "test.txt", content },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      // Should use base64 encoding
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        ["user@server.com", expect.stringContaining("base64 -d")],
+        expect.any(Object)
+      );
+      expect(result.content[0].text).toContain("Successfully wrote");
+      expect(result.details.remote).toBe(true);
+    });
+  });
+
+  describe("edit tool", () => {
+    it("should edit file locally when no SSH host configured", async () => {
+      const api = createMockExtensionAPI();
+      let callCount = 0;
+      const execMock = jest.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          // Read
+          return Promise.resolve({
+            stdout: "hello world",
+            stderr: "",
+            code: 0,
+            killed: false,
+          });
+        }
+        // Write
+        return Promise.resolve({
+          stdout: "",
+          stderr: "",
+          code: 0,
+          killed: false,
+        });
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const editTool = api._registeredTools.get("edit");
+
+      const result = await editTool.execute(
+        "tool-1",
+        { path: "test.txt", oldText: "hello", newText: "goodbye" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.content[0].text).toContain("Successfully edited");
+      expect(result.details.remote).toBe(false);
+    });
+
+    it("should fail when oldText is not found", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "hello world",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const editTool = api._registeredTools.get("edit");
+
+      const result = await editTool.execute(
+        "tool-1",
+        { path: "test.txt", oldText: "nonexistent", newText: "replacement" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("oldText not found");
+    });
+
+    it("should fail when oldText appears multiple times", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "hello hello hello",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const editTool = api._registeredTools.get("edit");
+
+      const result = await editTool.execute(
+        "tool-1",
+        { path: "test.txt", oldText: "hello", newText: "goodbye" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("appears 3 times");
+    });
+  });
+
+  describe("session state persistence", () => {
+    it("should restore state from session on session_start", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      (ctx.sessionManager.getBranch as jest.Mock).mockReturnValue([
+        {
+          type: "custom",
+          customType: "ssh-remote-config",
+          data: {
+            host: "restored@host.com",
+            remoteCwd: "/restored/path",
+          },
+        },
+      ]);
+
+      // Trigger session_start
+      const handlers = api._eventHandlers.get("session_start")!;
+      for (const handler of handlers) {
+        await handler({}, ctx);
+      }
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "ssh-remote",
+        expect.stringContaining("restored@host.com")
+      );
+    });
+
+    it("should use CLI flags over session state", async () => {
+      const api = createMockExtensionAPI();
+      
+      extensionFn(api);
+
+      // Set CLI flag values after extension registers them but before session_start
+      api._registeredFlags.get("--ssh-host")!.value = "cli@host.com";
+      api._registeredFlags.get("--ssh-cwd")!.value = "/cli/path";
+
+      const ctx = createMockContext();
+      (ctx.sessionManager.getBranch as jest.Mock).mockReturnValue([
+        {
+          type: "custom",
+          customType: "ssh-remote-config",
+          data: {
+            host: "session@host.com",
+            remoteCwd: "/session/path",
+          },
+        },
+      ]);
+
+      // Trigger session_start
+      const handlers = api._eventHandlers.get("session_start")!;
+      for (const handler of handlers) {
+        await handler({}, ctx);
+      }
+
+      // Should use CLI host, not session host
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("cli@host.com"),
+        "info"
+      );
+    });
+  });
+
+  describe("shell escaping", () => {
+    it("should escape single quotes in paths", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "content",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const readTool = api._registeredTools.get("read");
+      await readTool.execute(
+        "tool-1",
+        { path: "file's name.txt" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      // Should escape the single quote
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        ["user@server.com", "cat 'file'\\''s name.txt'"],
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe("render functions", () => {
+    it("should render bash call with SSH prefix when configured", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const bashTool = api._registeredTools.get("bash");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+        bold: (text: string) => `**${text}**`,
+      };
+
+      const rendered = bashTool.renderCall({ command: "ls -la" }, mockTheme);
+      expect(rendered.text).toContain("user@server.com");
+      expect(rendered.text).toContain("ls -la");
+    });
+
+    it("should render bash result with remote prefix", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const bashTool = api._registeredTools.get("bash");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+        bold: (text: string) => `**${text}**`,
+        dim: (text: string) => `~${text}~`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "output line 1\noutput line 2" }],
+        details: { exitCode: 0, remote: true },
+      };
+
+      const rendered = bashTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("[remote]");
+      expect(rendered.text).toContain("output line 1");
+    });
+
+    it("should render partial bash result as 'Running...'", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const bashTool = api._registeredTools.get("bash");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "" }],
+        details: {},
+      };
+
+      const rendered = bashTool.renderResult(result, { isPartial: true, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("Running...");
+    });
+
+    it("should render write result with byte count", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const writeTool = api._registeredTools.get("write");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+        bold: (text: string) => `**${text}**`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "Success" }],
+        details: { bytes: 1024, remote: true },
+      };
+
+      const rendered = writeTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("1024");
+      expect(rendered.text).toContain("[remote]");
+    });
+
+    it("should render edit result with line delta", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const editTool = api._registeredTools.get("edit");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+        bold: (text: string) => `**${text}**`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "Success" }],
+        details: { lineDelta: 5, remote: true },
+      };
+
+      const rendered = editTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("+5");
+      expect(rendered.text).toContain("[remote]");
+    });
+  });
+
+  describe("error handling", () => {
+    it("should handle bash execution errors", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockRejectedValue(new Error("Connection refused"));
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const bashTool = api._registeredTools.get("bash");
+
+      const result = await bashTool.execute(
+        "tool-1",
+        { command: "ls" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Connection refused");
+    });
+
+    it("should handle read errors on remote", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "",
+        stderr: "No such file or directory",
+        code: 1,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const readTool = api._registeredTools.get("read");
+      const result = await readTool.execute(
+        "tool-1",
+        { path: "nonexistent.txt" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Error reading file");
+    });
+
+    it("should handle write errors on remote", async () => {
+      const api = createMockExtensionAPI();
+      let callCount = 0;
+      const execMock = jest.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          // mkdir succeeds
+          return Promise.resolve({ stdout: "", stderr: "", code: 0, killed: false });
+        }
+        // write fails
+        return Promise.resolve({ stdout: "", stderr: "Permission denied", code: 1, killed: false });
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const writeTool = api._registeredTools.get("write");
+      const result = await writeTool.execute(
+        "tool-1",
+        { path: "/root/test.txt", content: "test" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Error writing file");
+    });
+
+    it("should handle edit read errors", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "",
+        stderr: "Permission denied",
+        code: 1,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const editTool = api._registeredTools.get("edit");
+
+      const result = await editTool.execute(
+        "tool-1",
+        { path: "test.txt", oldText: "hello", newText: "goodbye" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Error reading file");
+    });
+
+    it("should handle edit write errors", async () => {
+      const api = createMockExtensionAPI();
+      let callCount = 0;
+      const execMock = jest.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          // Read succeeds
+          return Promise.resolve({ stdout: "hello world", stderr: "", code: 0, killed: false });
+        }
+        // Write fails
+        return Promise.resolve({ stdout: "", stderr: "Disk full", code: 1, killed: false });
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const editTool = api._registeredTools.get("edit");
+
+      const result = await editTool.execute(
+        "tool-1",
+        { path: "test.txt", oldText: "hello", newText: "goodbye" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Error writing file");
+    });
+
+    it("should render error results correctly", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const writeTool = api._registeredTools.get("write");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "Permission denied" }],
+        details: { error: "Permission denied" },
+        isError: true,
+      };
+
+      const rendered = writeTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("Permission denied");
+      expect(rendered.text).toContain("[error]");
+    });
+  });
+
+  describe("edge cases", () => {
+    it("should handle timeout parameter in bash", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "done",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const bashTool = api._registeredTools.get("bash");
+
+      await bashTool.execute(
+        "tool-1",
+        { command: "sleep 10", timeout: 5 },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "bash",
+        ["-c", "sleep 10"],
+        expect.objectContaining({ timeout: 5000 })
+      );
+    });
+
+    it("should handle read with only offset (no limit)", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "lines from offset",
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const readTool = api._registeredTools.get("read");
+      await readTool.execute(
+        "tool-1",
+        { path: "test.txt", offset: 50 },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        ["user@server.com", "sed -n '50,$p' 'test.txt'"],
+        expect.any(Object)
+      );
+    });
+
+    it("should show current SSH config with cwd", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      // Set host with cwd
+      await sshCommand.handler("user@server.com /home/user", ctx);
+      
+      // Clear mock
+      (ctx.ui.notify as jest.Mock).mockClear();
+
+      // Query current config
+      await sshCommand.handler("", ctx);
+
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        "SSH remote: user@server.com with cwd: /home/user",
+        "info"
+      );
+    });
+
+    it("should restore state on session_tree event", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      (ctx.sessionManager.getBranch as jest.Mock).mockReturnValue([
+        {
+          type: "custom",
+          customType: "ssh-remote-config",
+          data: {
+            host: "tree@host.com",
+            remoteCwd: "/tree/path",
+          },
+        },
+      ]);
+
+      // Trigger session_tree
+      const handlers = api._eventHandlers.get("session_tree")!;
+      for (const handler of handlers) {
+        await handler({}, ctx);
+      }
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "ssh-remote",
+        expect.stringContaining("tree@host.com")
+      );
+    });
+
+    it("should restore state on session_branch event", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      (ctx.sessionManager.getBranch as jest.Mock).mockReturnValue([
+        {
+          type: "custom",
+          customType: "ssh-remote-config",
+          data: {
+            host: "branch@host.com",
+            remoteCwd: null,
+          },
+        },
+      ]);
+
+      // Trigger session_branch
+      const handlers = api._eventHandlers.get("session_branch")!;
+      for (const handler of handlers) {
+        await handler({}, ctx);
+      }
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "ssh-remote",
+        expect.stringContaining("branch@host.com")
+      );
+    });
+
+    it("should handle bash output truncation", async () => {
+      const api = createMockExtensionAPI();
+      // Generate output that will be truncated
+      const longOutput = Array(3000).fill("line").join("\n");
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: longOutput,
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const bashTool = api._registeredTools.get("bash");
+
+      const result = await bashTool.execute(
+        "tool-1",
+        { command: "cat bigfile" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.content[0].text).toContain("[Output truncated:");
+      expect(result.details.truncation).toBeDefined();
+    });
+
+    it("should handle read output truncation", async () => {
+      const api = createMockExtensionAPI();
+      const longContent = Array(3000).fill("line content").join("\n");
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: longContent,
+        stderr: "",
+        code: 0,
+        killed: false,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      
+      // Configure SSH
+      const sshCommand = api._registeredCommands.get("ssh");
+      await sshCommand.handler("user@server.com", ctx);
+
+      const readTool = api._registeredTools.get("read");
+      const result = await readTool.execute(
+        "tool-1",
+        { path: "bigfile.txt" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.content[0].text).toContain("[Output truncated:");
+    });
+
+    it("should render bash result with non-zero exit code", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const bashTool = api._registeredTools.get("bash");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+        dim: (text: string) => `~${text}~`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "error output" }],
+        details: { exitCode: 1, remote: false },
+      };
+
+      const rendered = bashTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("[exit: 1]");
+      expect(rendered.text).toContain("[error]");
+    });
+
+    it("should render bash result with error in details", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const bashTool = api._registeredTools.get("bash");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "" }],
+        details: { error: "Connection timeout" },
+      };
+
+      const rendered = bashTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("Connection timeout");
+    });
+
+    it("should render bash result with many lines (truncated display)", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const bashTool = api._registeredTools.get("bash");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+        dim: (text: string) => `~${text}~`,
+      };
+
+      // Generate more than 10 lines
+      const manyLines = Array(15).fill(0).map((_, i) => `line ${i}`).join("\n");
+      const result = {
+        content: [{ type: "text", text: manyLines }],
+        details: { exitCode: 0, remote: false },
+      };
+
+      const rendered = bashTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("[dim]...[/dim]"); // Should show truncation indicator
+    });
+
+    it("should render read call without SSH prefix when not configured", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const readTool = api._registeredTools.get("read");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const rendered = readTool.renderCall({ path: "test.txt" }, mockTheme);
+      // When not configured, there's no [accent] prefix for the host
+      expect(rendered.text).not.toContain("[accent]");
+      expect(rendered.text).toContain("read test.txt");
+    });
+
+    it("should render write call without SSH prefix when not configured", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const writeTool = api._registeredTools.get("write");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const rendered = writeTool.renderCall({ path: "test.txt" }, mockTheme);
+      expect(rendered.text).toContain("write test.txt");
+    });
+
+    it("should render edit call without SSH prefix when not configured", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const editTool = api._registeredTools.get("edit");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const rendered = editTool.renderCall({ path: "test.txt" }, mockTheme);
+      expect(rendered.text).toContain("edit test.txt");
+    });
+
+    it("should render edit result as partial (Editing...)", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const editTool = api._registeredTools.get("edit");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "" }],
+        details: {},
+      };
+
+      const rendered = editTool.renderResult(result, { isPartial: true, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("Editing...");
+    });
+
+    it("should render write result as partial (Writing...)", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const writeTool = api._registeredTools.get("write");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "" }],
+        details: {},
+      };
+
+      const rendered = writeTool.renderResult(result, { isPartial: true, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("Writing...");
+    });
+
+    it("should render edit error result", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const editTool = api._registeredTools.get("edit");
+      const mockTheme = {
+        fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      };
+
+      const result = {
+        content: [{ type: "text", text: "oldText not found" }],
+        details: { error: "not found" },
+        isError: true,
+      };
+
+      const rendered = editTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
+      expect(rendered.text).toContain("oldText not found");
+      expect(rendered.text).toContain("[error]");
+    });
+
+    it("should handle edit with negative line delta", async () => {
+      const api = createMockExtensionAPI();
+      let callCount = 0;
+      const execMock = jest.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({ stdout: "line1\nline2\nline3\nline4", stderr: "", code: 0, killed: false });
+        }
+        return Promise.resolve({ stdout: "", stderr: "", code: 0, killed: false });
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const editTool = api._registeredTools.get("edit");
+
+      const result = await editTool.execute(
+        "tool-1",
+        { path: "test.txt", oldText: "line2\nline3\n", newText: "" },
+        undefined,
+        ctx,
+        undefined
+      );
+
+      expect(result.details.lineDelta).toBe(-2);
+    });
+  });
+});
