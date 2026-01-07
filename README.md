@@ -110,6 +110,8 @@ pi --tools '' -e ./ssh-remote.ts
 
 - **Proper shell escaping** - Handles special characters in paths and content
 
+- **Smart tool detection** - Auto-detects `rg` (ripgrep) and `fd` on the remote host and uses them when available, falling back to standard `grep` and `find` otherwise
+
 ## Requirements
 
 - SSH access to the remote host (key-based authentication recommended for seamless operation)
@@ -134,7 +136,7 @@ For write operations, content is base64-encoded to safely pass through the shell
 - **No streaming for large outputs** - Output is collected and returned after command completes.
 - **SSH connection per command** - Each tool call establishes a new SSH connection. Consider using SSH connection multiplexing (`ControlMaster`) for better performance.
 - **Tool name conflicts** - Must disable all built-in tools using `--tools ''` flag.
-- **grep/find use basic commands** - The SSH-wrapped grep and find use standard Unix commands rather than ripgrep/fd, so some advanced features may differ from the built-in tools.
+
 
 ## Recommended SSH config for performance
 

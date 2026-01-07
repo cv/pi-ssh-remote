@@ -25,12 +25,22 @@ interface SSHConfig {
 	command: string | null;
 }
 
+// Cache for remote tool availability
+interface RemoteToolsCache {
+	host: string; // The host this cache is for
+	hasRg: boolean;
+	hasFd: boolean;
+}
+
 export default function sshRemoteExtension(pi: ExtensionAPI) {
 	// Current SSH configuration
 	let sshHost: string | null = null;
 	let remoteCwd: string | null = null;
 	let sshPort: number | null = null;
 	let sshCommand: string | null = null; // Custom SSH command (e.g., "tsh ssh" for Teleport)
+
+	// Cache for remote tool availability (invalidated when host changes)
+	let remoteToolsCache: RemoteToolsCache | null = null;
 
 	// Register CLI flags for SSH configuration
 	pi.registerFlag("ssh-host", {
@@ -128,6 +138,44 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		return command;
 	}
 
+	// Detect available tools on remote host (rg, fd)
+	async function detectRemoteTools(ctx: ExtensionContext): Promise<RemoteToolsCache> {
+		if (!sshHost) {
+			return { host: "", hasRg: false, hasFd: false };
+		}
+
+		// Return cached result if host matches
+		if (remoteToolsCache && remoteToolsCache.host === sshHost) {
+			return remoteToolsCache;
+		}
+
+		// Detect rg and fd in a single SSH call
+		const detectCmd = "command -v rg >/dev/null 2>&1 && echo 'rg:yes' || echo 'rg:no'; command -v fd >/dev/null 2>&1 && echo 'fd:yes' || echo 'fd:no'";
+		const prefix = sshPrefix();
+
+		try {
+			const result = await pi.exec(prefix[0], [...prefix.slice(1), detectCmd], {
+				cwd: ctx.cwd,
+			});
+
+			const output = result.stdout;
+			const hasRg = output.includes("rg:yes");
+			const hasFd = output.includes("fd:yes");
+
+			remoteToolsCache = { host: sshHost, hasRg, hasFd };
+			return remoteToolsCache;
+		} catch {
+			// On error, assume basic tools only
+			remoteToolsCache = { host: sshHost, hasRg: false, hasFd: false };
+			return remoteToolsCache;
+		}
+	}
+
+	// Invalidate tools cache (call when host changes)
+	function invalidateToolsCache() {
+		remoteToolsCache = null;
+	}
+
 	// Register /ssh command to configure remote host
 	pi.registerCommand("ssh", {
 		description: "Configure SSH remote. Usage: /ssh user@host [cwd] | /ssh port <port> | /ssh command <cmd> | /ssh off",
@@ -152,6 +200,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				remoteCwd = null;
 				sshPort = null;
 				sshCommand = null;
+				invalidateToolsCache();
 				persistState();
 				updateStatus(ctx);
 				ctx.ui.notify("SSH remote disabled", "info");
@@ -192,6 +241,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			// Set new host (and optionally cwd)
 			sshHost = parts[0];
 			remoteCwd = parts[1] || null;
+			invalidateToolsCache();
 			persistState();
 			updateStatus(ctx);
 
@@ -692,7 +742,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "grep",
 		label: "Grep (SSH)",
-		description: `Search file contents for a pattern. When SSH remote is configured, searches on the remote host. Returns matching lines with file paths and line numbers. Uses grep on remote.`,
+		description: `Search file contents for a pattern. When SSH remote is configured, searches on the remote host. Returns matching lines with file paths and line numbers. Uses rg (ripgrep) if available, otherwise grep.`,
 		parameters: Type.Object({
 			pattern: Type.String({ description: "Search pattern (regex or literal string)" }),
 			path: Type.Optional(Type.String({ description: "Directory or file to search (default: current directory)" })),
@@ -715,20 +765,35 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			const effectiveLimit = limit ?? 100;
 			const searchDir = searchPath || ".";
 
-			// Build grep command
-			let grepArgs = ["-r", "-n", "--color=never"];
-			if (ignoreCase) grepArgs.push("-i");
-			if (literal) grepArgs.push("-F");
-			if (context && context > 0) grepArgs.push(`-C${context}`);
+			// Detect available tools on remote
+			const tools = sshHost ? await detectRemoteTools(ctx) : { hasRg: false, hasFd: false, host: "" };
 
-			// Escape pattern for shell
-			const escapedPattern = escapeForShell(pattern);
-			const cmd = `grep ${grepArgs.join(" ")} ${escapedPattern} ${escapeForShell(searchDir)} 2>/dev/null | head -n ${effectiveLimit}`;
+			let cmd: string;
+			if (tools.hasRg) {
+				// Use ripgrep (rg)
+				let rgArgs = ["-n", "--color=never"];
+				if (ignoreCase) rgArgs.push("-i");
+				if (literal) rgArgs.push("-F");
+				if (context && context > 0) rgArgs.push(`-C${context}`);
+				rgArgs.push("-m", String(effectiveLimit)); // rg has built-in limit
+
+				const escapedPattern = escapeForShell(pattern);
+				cmd = `rg ${rgArgs.join(" ")} ${escapedPattern} ${escapeForShell(searchDir)} 2>/dev/null`;
+			} else {
+				// Fall back to grep
+				let grepArgs = ["-r", "-n", "--color=never"];
+				if (ignoreCase) grepArgs.push("-i");
+				if (literal) grepArgs.push("-F");
+				if (context && context > 0) grepArgs.push(`-C${context}`);
+
+				const escapedPattern = escapeForShell(pattern);
+				cmd = `grep ${grepArgs.join(" ")} ${escapedPattern} ${escapeForShell(searchDir)} 2>/dev/null | head -n ${effectiveLimit}`;
+			}
 
 			let fullCommand: string[];
 			if (sshHost) {
 				const remoteCmd = buildRemoteCommand(cmd);
-				fullCommand = ["ssh", sshHost, remoteCmd];
+				fullCommand = [...sshPrefix(), remoteCmd];
 			} else {
 				fullCommand = ["bash", "-c", cmd];
 			}
@@ -785,7 +850,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "find",
 		label: "Find (SSH)",
-		description: `Search for files by name pattern. When SSH remote is configured, searches on the remote host. Returns matching file paths.`,
+		description: `Search for files by name pattern. When SSH remote is configured, searches on the remote host. Returns matching file paths. Uses fd if available, otherwise find.`,
 		parameters: Type.Object({
 			pattern: Type.String({ description: "File name pattern (glob-style, e.g. '*.ts', '*.json')" }),
 			path: Type.Optional(Type.String({ description: "Directory to search in (default: current directory)" })),
@@ -802,13 +867,23 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			const effectiveLimit = limit ?? 1000;
 			const searchDir = searchPath || ".";
 
-			// Build find command - use find with -name for glob patterns
-			const cmd = `find ${escapeForShell(searchDir)} -name ${escapeForShell(pattern)} 2>/dev/null | head -n ${effectiveLimit}`;
+			// Detect available tools on remote
+			const tools = sshHost ? await detectRemoteTools(ctx) : { hasRg: false, hasFd: false, host: "" };
+
+			let cmd: string;
+			if (tools.hasFd) {
+				// Use fd - note: fd uses regex by default, -g for glob patterns
+				// fd has --max-results for limiting
+				cmd = `fd -g ${escapeForShell(pattern)} ${escapeForShell(searchDir)} --max-results ${effectiveLimit} 2>/dev/null`;
+			} else {
+				// Fall back to find
+				cmd = `find ${escapeForShell(searchDir)} -name ${escapeForShell(pattern)} 2>/dev/null | head -n ${effectiveLimit}`;
+			}
 
 			let fullCommand: string[];
 			if (sshHost) {
 				const remoteCmd = buildRemoteCommand(cmd);
-				fullCommand = ["ssh", sshHost, remoteCmd];
+				fullCommand = [...sshPrefix(), remoteCmd];
 			} else {
 				fullCommand = ["bash", "-c", cmd];
 			}
@@ -963,6 +1038,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			remoteCwd = cliCwd || null;
 			sshPort = cliPort ? parseInt(cliPort, 10) : null;
 			sshCommand = cliCommand || null;
+			invalidateToolsCache();
 			persistState();
 			updateStatus(ctx);
 			
