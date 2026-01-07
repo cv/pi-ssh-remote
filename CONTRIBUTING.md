@@ -25,15 +25,18 @@ npm install
 npm test        # Verify setup with unit tests
 ```
 
-## Running Tests
+## Running Tests & Linting
 
 | Command | Description |
 |---------|-------------|
+| `npm run lint` | Run ESLint (strict TypeScript + security rules) |
+| `npm run lint:fix` | Auto-fix lint issues |
 | `npm test` | Unit tests only (fast, no Docker) |
 | `npm run test:watch` | Unit tests in watch mode |
 | `npm run test:coverage` | Unit tests with coverage |
 | `npm run test:e2e` | E2E tests (requires Docker) |
 | `npm run test:all` | Both unit and e2e tests |
+| `npm run check` | **Full check: lint + all tests** |
 
 ### About E2E Tests
 
@@ -50,7 +53,7 @@ The e2e tests spin up a Docker container with an SSH server to test real SSH con
 1. Create a branch for your changes
 2. Make changes to `ssh-remote.ts`
 3. Add/update tests as needed
-4. Run `npm run test:all` to verify
+4. Run `npm run check` to verify (lint + all tests)
 5. Submit a pull request
 
 ## Need Help?

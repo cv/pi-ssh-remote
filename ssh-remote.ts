@@ -32,6 +32,13 @@ interface RemoteToolsCache {
 	hasFd: boolean;
 }
 
+// Tool result type with optional isError flag
+interface ToolResultWithError {
+	isError?: boolean;
+	details?: Record<string, unknown>;
+	content: Array<{ type: string; text?: string }>;
+}
+
 export default function sshRemoteExtension(pi: ExtensionAPI) {
 	// Current SSH configuration
 	let sshHost: string | null = null;
@@ -102,6 +109,14 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		}
 
 		updateStatus(ctx);
+	}
+
+	// Helper to safely extract error message from unknown error type
+	function getErrorMessage(err: unknown): string {
+		if (err instanceof Error) {
+			return err.message;
+		}
+		return String(err);
 	}
 
 	// Helper to escape shell arguments for SSH
@@ -268,17 +283,14 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			const { command, timeout } = params as { command: string; timeout?: number };
 
 			let fullCommand: string[];
-			let displayCommand: string;
 
 			if (sshHost) {
 				// Execute remotely via SSH
 				const remoteCmd = buildRemoteCommand(command);
 				fullCommand = [...sshPrefix(), remoteCmd];
-				displayCommand = `ssh ${sshHost} ${remoteCmd}`;
 			} else {
 				// Execute locally (fallback)
 				fullCommand = ["bash", "-c", command];
-				displayCommand = command;
 			}
 
 			try {
@@ -314,10 +326,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						truncation: truncation.truncated ? truncation : undefined,
 					},
 				};
-			} catch (err: any) {
+			} catch (err: unknown) {
 				return {
-					content: [{ type: "text", text: `Error: ${err.message}` }],
-					details: { error: err.message, remote: !!sshHost },
+					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+					details: { error: getErrorMessage(err), remote: !!sshHost },
 					isError: true,
 				};
 			}
@@ -441,10 +453,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						truncation: truncation.truncated ? truncation : undefined,
 					},
 				};
-			} catch (err: any) {
+			} catch (err: unknown) {
 				return {
-					content: [{ type: "text", text: `Error: ${err.message}` }],
-					details: { path, error: err.message, remote: true },
+					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+					details: { path, error: getErrorMessage(err), remote: true },
 					isError: true,
 				};
 			}
@@ -514,10 +526,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						content: [{ type: "text", text: `Successfully wrote ${content.length} bytes to ${path}` }],
 						details: { path, bytes: content.length, remote: false },
 					};
-				} catch (err: any) {
+				} catch (err: unknown) {
 					return {
-						content: [{ type: "text", text: `Error: ${err.message}` }],
-						details: { path, error: err.message, remote: false },
+						content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+						details: { path, error: getErrorMessage(err), remote: false },
 						isError: true,
 					};
 				}
@@ -553,10 +565,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: `Successfully wrote ${content.length} bytes to ${path}` }],
 					details: { path, bytes: content.length, remote: true, host: sshHost },
 				};
-			} catch (err: any) {
+			} catch (err: unknown) {
 				return {
-					content: [{ type: "text", text: `Error: ${err.message}` }],
-					details: { path, error: err.message, remote: true },
+					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+					details: { path, error: getErrorMessage(err), remote: true },
 					isError: true,
 				};
 			}
@@ -574,9 +586,9 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			const details = result.details as { bytes?: number; error?: string; remote?: boolean } | undefined;
-			const resultAny = result as any;
+			const typedResult = result as ToolResultWithError;
 
-			if (details?.error || resultAny.isError) {
+			if (details?.error || typedResult.isError) {
 				const content = result.content[0];
 				const text = content?.type === "text" ? content.text : "Error";
 				return new Text(theme.fg("error", text), 0, 0);
@@ -611,7 +623,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			// 4. Write the file back
 
 			let readCmd: string[];
-			let host = sshHost;
+			const host = sshHost;
 
 			if (host) {
 				const remoteCmd = buildRemoteCommand(`cat ${escapeForShell(path)}`);
@@ -700,10 +712,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 						host,
 					},
 				};
-			} catch (err: any) {
+			} catch (err: unknown) {
 				return {
-					content: [{ type: "text", text: `Error: ${err.message}` }],
-					details: { path, error: err.message, remote: !!host },
+					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+					details: { path, error: getErrorMessage(err), remote: !!host },
 					isError: true,
 				};
 			}
@@ -721,9 +733,9 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 
 			const details = result.details as { lineDelta?: number; error?: string; remote?: boolean } | undefined;
-			const resultAny = result as any;
+			const typedResult = result as ToolResultWithError;
 
-			if (details?.error || resultAny.isError) {
+			if (details?.error || typedResult.isError) {
 				const content = result.content[0];
 				const text = content?.type === "text" ? content.text : "Error";
 				return new Text(theme.fg("error", text), 0, 0);
@@ -771,7 +783,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			let cmd: string;
 			if (tools.hasRg) {
 				// Use ripgrep (rg)
-				let rgArgs = ["-n", "--color=never"];
+				const rgArgs = ["-n", "--color=never"];
 				if (ignoreCase) rgArgs.push("-i");
 				if (literal) rgArgs.push("-F");
 				if (context && context > 0) rgArgs.push(`-C${context}`);
@@ -781,7 +793,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				cmd = `rg ${rgArgs.join(" ")} ${escapedPattern} ${escapeForShell(searchDir)} 2>/dev/null`;
 			} else {
 				// Fall back to grep
-				let grepArgs = ["-r", "-n", "--color=never"];
+				const grepArgs = ["-r", "-n", "--color=never"];
 				if (ignoreCase) grepArgs.push("-i");
 				if (literal) grepArgs.push("-F");
 				if (context && context > 0) grepArgs.push(`-C${context}`);
@@ -828,10 +840,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: resultText }],
 					details: { remote: !!sshHost, host: sshHost },
 				};
-			} catch (err: any) {
+			} catch (err: unknown) {
 				return {
-					content: [{ type: "text", text: `Error: ${err.message}` }],
-					details: { error: err.message, remote: !!sshHost },
+					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+					details: { error: getErrorMessage(err), remote: !!sshHost },
 					isError: true,
 				};
 			}
@@ -918,10 +930,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: resultText }],
 					details: { remote: !!sshHost, host: sshHost },
 				};
-			} catch (err: any) {
+			} catch (err: unknown) {
 				return {
-					content: [{ type: "text", text: `Error: ${err.message}` }],
-					details: { error: err.message, remote: !!sshHost },
+					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+					details: { error: getErrorMessage(err), remote: !!sshHost },
 					isError: true,
 				};
 			}
@@ -1005,10 +1017,10 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: resultText }],
 					details: { remote: !!sshHost, host: sshHost },
 				};
-			} catch (err: any) {
+			} catch (err: unknown) {
 				return {
-					content: [{ type: "text", text: `Error: ${err.message}` }],
-					details: { error: err.message, remote: !!sshHost },
+					content: [{ type: "text", text: `Error: ${getErrorMessage(err)}` }],
+					details: { error: getErrorMessage(err), remote: !!sshHost },
 					isError: true,
 				};
 			}

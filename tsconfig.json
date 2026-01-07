@@ -10,6 +10,6 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["*.ts"],
+  "include": ["*.ts", "e2e/**/*.ts"],
   "exclude": ["node_modules", "dist", "coverage"]
 }
