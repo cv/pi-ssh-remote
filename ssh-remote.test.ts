@@ -1539,6 +1539,177 @@ describe("ssh-remote extension", () => {
 			);
 		});
 
+		it("should apply default SSH timeout to read tool when configured", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest.fn().mockResolvedValue({
+				stdout: "file content",
+				stderr: "",
+				code: 0,
+				killed: false,
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Set SSH timeout and host
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("timeout 25", ctx);
+			await sshCommand.handler("user@host.com", ctx);
+
+			const readTool = api._registeredTools.get("read");
+			await readTool.execute("tool-1", { path: "test.txt" }, undefined, ctx, undefined);
+
+			expect(execMock).toHaveBeenCalledWith(
+				"ssh",
+				["user@host.com", "cat 'test.txt'"],
+				expect.objectContaining({ timeout: 25000 })
+			);
+		});
+
+		it("should apply default SSH timeout to write tool when configured", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest.fn().mockResolvedValue({
+				stdout: "",
+				stderr: "",
+				code: 0,
+				killed: false,
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Set SSH timeout and host
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("timeout 35", ctx);
+			await sshCommand.handler("user@host.com", ctx);
+
+			const writeTool = api._registeredTools.get("write");
+			await writeTool.execute("tool-1", { path: "test.txt", content: "hello" }, undefined, ctx, undefined);
+
+			// First call is mkdir, second is write - both should have timeout
+			expect(execMock).toHaveBeenCalledWith("ssh", expect.any(Array), expect.objectContaining({ timeout: 35000 }));
+		});
+
+		it("should apply default SSH timeout to edit tool when configured", async () => {
+			const api = createMockExtensionAPI();
+			let callCount = 0;
+			const execMock = jest.fn().mockImplementation(() => {
+				callCount++;
+				if (callCount === 1) {
+					return Promise.resolve({ stdout: "hello world", stderr: "", code: 0, killed: false });
+				}
+				return Promise.resolve({ stdout: "", stderr: "", code: 0, killed: false });
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Set SSH timeout and host
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("timeout 40", ctx);
+			await sshCommand.handler("user@host.com", ctx);
+
+			const editTool = api._registeredTools.get("edit");
+			await editTool.execute(
+				"tool-1",
+				{ path: "test.txt", oldText: "hello", newText: "goodbye" },
+				undefined,
+				ctx,
+				undefined
+			);
+
+			// Both read and write calls should have timeout
+			expect(execMock).toHaveBeenCalledWith("ssh", expect.any(Array), expect.objectContaining({ timeout: 40000 }));
+		});
+
+		it("should apply default SSH timeout to grep tool when configured", async () => {
+			const api = createMockExtensionAPI();
+			let callCount = 0;
+			const execMock = jest.fn().mockImplementation(() => {
+				callCount++;
+				if (callCount === 1) {
+					// Tool detection call
+					return Promise.resolve({ stdout: "rg:no\nfd:no\n", stderr: "", code: 0 });
+				}
+				return Promise.resolve({ stdout: "file.txt:1:match\n", stderr: "", code: 0 });
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Set SSH timeout and host
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("timeout 50", ctx);
+			await sshCommand.handler("user@host.com", ctx);
+
+			const grepTool = api._registeredTools.get("grep");
+			await grepTool.execute("tool-1", { pattern: "test" }, undefined, ctx, undefined);
+
+			// The grep execution call (second call) should have timeout
+			const calls = execMock.mock.calls;
+			expect(calls[1][2]).toEqual(expect.objectContaining({ timeout: 50000 }));
+		});
+
+		it("should apply default SSH timeout to find tool when configured", async () => {
+			const api = createMockExtensionAPI();
+			let callCount = 0;
+			const execMock = jest.fn().mockImplementation(() => {
+				callCount++;
+				if (callCount === 1) {
+					// Tool detection call
+					return Promise.resolve({ stdout: "rg:no\nfd:no\n", stderr: "", code: 0 });
+				}
+				return Promise.resolve({ stdout: "./file.txt\n", stderr: "", code: 0 });
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Set SSH timeout and host
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("timeout 55", ctx);
+			await sshCommand.handler("user@host.com", ctx);
+
+			const findTool = api._registeredTools.get("find");
+			await findTool.execute("tool-1", { pattern: "*.txt" }, undefined, ctx, undefined);
+
+			// The find execution call (second call) should have timeout
+			const calls = execMock.mock.calls;
+			expect(calls[1][2]).toEqual(expect.objectContaining({ timeout: 55000 }));
+		});
+
+		it("should apply default SSH timeout to ls tool when configured", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest.fn().mockResolvedValue({
+				stdout: "file1.txt\nfile2.txt\n",
+				stderr: "",
+				code: 0,
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Set SSH timeout and host
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("timeout 60", ctx);
+			await sshCommand.handler("user@host.com", ctx);
+
+			const lsTool = api._registeredTools.get("ls");
+			await lsTool.execute("tool-1", { path: "/var" }, undefined, ctx, undefined);
+
+			expect(execMock).toHaveBeenCalledWith(
+				"ssh",
+				["user@host.com", expect.stringContaining("ls ")],
+				expect.objectContaining({ timeout: 60000 })
+			);
+		});
+
 		it("should handle read with only offset (no limit)", async () => {
 			const api = createMockExtensionAPI();
 			const execMock = jest.fn().mockResolvedValue({
