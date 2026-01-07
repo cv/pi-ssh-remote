@@ -46,7 +46,7 @@ describe("ssh-remote extension - render functions", () => {
 		};
 
 		const rendered = bashTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
-		expect(rendered.text).toContain("[remote]");
+		expect(rendered.text).toContain("🔌");
 		expect(rendered.text).toContain("output line 1");
 	});
 
@@ -85,7 +85,7 @@ describe("ssh-remote extension - render functions", () => {
 
 		const rendered = writeTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
 		expect(rendered.text).toContain("1024");
-		expect(rendered.text).toContain("[remote]");
+		expect(rendered.text).toContain("🔌");
 	});
 
 	it("should render edit result with line delta", async () => {
@@ -105,7 +105,7 @@ describe("ssh-remote extension - render functions", () => {
 
 		const rendered = editTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
 		expect(rendered.text).toContain("+5");
-		expect(rendered.text).toContain("[remote]");
+		expect(rendered.text).toContain("🔌");
 	});
 
 	it("should render error results correctly", async () => {
@@ -323,7 +323,7 @@ describe("ssh-remote extension - render functions", () => {
 		};
 
 		const rendered = readTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
-		expect(rendered.text).toContain("[remote]");
+		expect(rendered.text).toContain("🔌");
 		expect(rendered.text).toContain("line 1");
 	});
 
@@ -400,7 +400,7 @@ describe("ssh-remote extension - render functions", () => {
 		};
 
 		const rendered = grepTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
-		expect(rendered.text).toContain("[remote]");
+		expect(rendered.text).toContain("🔌");
 		expect(rendered.text).toContain("3 matches");
 	});
 
@@ -476,7 +476,7 @@ describe("ssh-remote extension - render functions", () => {
 		};
 
 		const rendered = findTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
-		expect(rendered.text).toContain("[remote]");
+		expect(rendered.text).toContain("🔌");
 		expect(rendered.text).toContain("3 files found");
 	});
 
@@ -552,7 +552,7 @@ describe("ssh-remote extension - render functions", () => {
 		};
 
 		const rendered = lsTool.renderResult(result, { isPartial: false, expanded: false }, mockTheme);
-		expect(rendered.text).toContain("[remote]");
+		expect(rendered.text).toContain("🔌");
 		expect(rendered.text).toContain("3 entries"); // excludes . and ..
 	});
 

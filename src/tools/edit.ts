@@ -158,7 +158,7 @@ export function registerEditTool(state: SSHState): void {
 				return new Text(theme.fg("error", text), 0, 0);
 			}
 
-			const prefix = details?.remote ? theme.fg("accent", "[remote] ") : "";
+			const prefix = details?.remote ? theme.fg("accent", "🔌 ") : "";
 			const delta = details?.lineDelta || 0;
 			const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "±0";
 			return new Text(prefix + theme.fg("success", `✓ Edited (${deltaStr} lines)`), 0, 0);

@@ -99,7 +99,7 @@ export function registerWriteTool(state: SSHState): void {
 				return new Text(theme.fg("error", text), 0, 0);
 			}
 
-			const prefix = details?.remote ? theme.fg("accent", "[remote] ") : "";
+			const prefix = details?.remote ? theme.fg("accent", "🔌 ") : "";
 			return new Text(prefix + theme.fg("success", `✓ Wrote ${details?.bytes || 0} bytes`), 0, 0);
 		},
 	});

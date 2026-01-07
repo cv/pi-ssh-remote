@@ -114,7 +114,7 @@ export function registerFindTool(state: SSHState): void {
 				return new Text(theme.fg("error", text), 0, 0);
 			}
 
-			const prefix = details?.remote ? theme.fg("accent", "[remote] ") : "";
+			const prefix = details?.remote ? theme.fg("accent", "🔌 ") : "";
 			const content = result.content[0];
 			const text = content?.type === "text" ? content.text : "";
 

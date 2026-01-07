@@ -97,7 +97,7 @@ export function registerBashTool(state: SSHState): void {
 				return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
 			}
 
-			const prefix = details?.remote ? theme.fg("accent", "[remote] ") : "";
+			const prefix = details?.remote ? theme.fg("accent", "🔌 ") : "";
 			const exitInfo = details?.exitCode !== 0 ? theme.fg("error", ` [exit: ${details?.exitCode}]`) : "";
 
 			// Show first few lines of output
