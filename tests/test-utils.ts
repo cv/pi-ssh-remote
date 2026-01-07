@@ -151,5 +151,5 @@ export const createMockExtensionAPI = () => {
 
 // Load extension function
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const extensionModule = require("../ssh-remote") as { default: (api: any) => void };
+const extensionModule = require("../index") as { default: (api: any) => void };
 export const extensionFn = extensionModule.default;

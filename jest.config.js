@@ -15,7 +15,7 @@ module.exports = {
 	},
 	testMatch: ["**/tests/**/*.test.ts", "**/e2e/**/*.test.ts"],
 	testPathIgnorePatterns: ["/node_modules/"],
-	collectCoverageFrom: ["ssh-remote.ts"],
+	collectCoverageFrom: ["index.ts", "src/**/*.ts"],
 	coverageDirectory: "coverage",
 	coverageReporters: ["text", "lcov", "html"],
 	moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],

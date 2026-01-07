@@ -18,14 +18,14 @@
 	},
 	"pi": {
 		"extensions": [
-			"./ssh-remote.ts"
+			"./index.ts"
 		]
 	},
 	"scripts": {
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
-		"lint": "eslint ssh-remote.ts",
-		"lint:fix": "eslint ssh-remote.ts --fix",
+		"lint": "eslint index.ts src/",
+		"lint:fix": "eslint index.ts src/ --fix",
 		"test": "jest --testPathIgnorePatterns=e2e",
 		"test:watch": "jest --watch --testPathIgnorePatterns=e2e",
 		"test:coverage": "jest --coverage --testPathIgnorePatterns=e2e",

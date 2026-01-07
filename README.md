@@ -120,7 +120,7 @@ The generated config includes `ControlMaster auto` for SSH connection multiplexi
 - **Session persistence** - Configuration persists across session reloads and branching
 
 - **UI integration**:
-  - Shows status in footer: `🔗 SSH: user@host:port (cwd) [command]`
+  - Shows status in footer: `🔗 SSH: user@host:port (cwd) [command] ⏱timeout`
   - Tool calls show `[user@host]` prefix
   - Tool results show `[remote]` prefix
 
@@ -138,7 +138,7 @@ The generated config includes `ControlMaster auto` for SSH connection multiplexi
 ## Requirements
 
 - SSH access to the remote host (key-based authentication recommended for seamless operation)
-- Remote host must have standard utilities: `cat`, `sed`, `mkdir`, `base64`
+- Remote host must have standard utilities: `cat`, `sed`, `mkdir`, `base64`, `printf`, `ls`, `head`, `grep` (or `rg`), `find` (or `fd`)
 
 ## How it works
 

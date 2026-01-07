@@ -147,4 +147,89 @@ describe("ssh-remote extension - find tool", () => {
 		const calls = execMock.mock.calls;
 		expect(calls[1][2]).toEqual(expect.objectContaining({ timeout: 55000 }));
 	});
+
+	it("should handle SSH execution errors in find", async () => {
+		const api = createMockExtensionAPI();
+		let callCount = 0;
+		const execMock = jest.fn().mockImplementation(() => {
+			callCount++;
+			if (callCount === 1) {
+				// Tool detection succeeds
+				return Promise.resolve({ stdout: "rg:no\nfd:no\n", stderr: "", code: 0 });
+			}
+			// Find execution fails
+			return Promise.reject(new Error("Network unreachable"));
+		});
+		api._setExecMock(execMock);
+		extensionFn(api);
+
+		const ctx = createMockContext();
+		const sshCommand = api._registeredCommands.get("ssh");
+		await sshCommand.handler("user@remote.com", ctx);
+
+		const findTool = api._registeredTools.get("find");
+		const result = await findTool.execute("tool-1", { pattern: "*.txt" }, undefined, ctx, undefined);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("Network unreachable");
+		expect(result.details.error).toBe("Network unreachable");
+	});
+
+	it("should render find call with host prefix when SSH configured", () => {
+		const api = createMockExtensionAPI();
+		extensionFn(api);
+
+		// Configure SSH
+		const ctx = createMockContext();
+		const sshCommand = api._registeredCommands.get("ssh");
+		sshCommand.handler("user@remote.com", ctx);
+
+		const findTool = api._registeredTools.get("find");
+		const mockTheme = {
+			fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+		};
+
+		const rendered = findTool.renderCall({ pattern: "*.ts" }, mockTheme);
+		expect(rendered.text).toContain("user@remote.com");
+		expect(rendered.text).toContain("find *.ts");
+	});
+
+	it("should render find call without prefix when SSH not configured", () => {
+		const api = createMockExtensionAPI();
+		extensionFn(api);
+
+		const findTool = api._registeredTools.get("find");
+		const mockTheme = {
+			fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+		};
+
+		const rendered = findTool.renderCall({ pattern: "*.ts" }, mockTheme);
+		expect(rendered.text).not.toContain("@");
+		expect(rendered.text).toContain("find *.ts");
+	});
+
+	it("should fall back to find when fd not available", async () => {
+		const api = createMockExtensionAPI();
+		let callCount = 0;
+		(api.exec as jest.Mock).mockImplementation(() => {
+			callCount++;
+			if (callCount === 1) {
+				return Promise.resolve({ stdout: "rg:no\nfd:no\n", stderr: "", code: 0 });
+			}
+			return Promise.resolve({ stdout: "./file.txt\n", stderr: "", code: 0 });
+		});
+
+		extensionFn(api);
+		const ctx = createMockContext();
+
+		const sshCommand = api._registeredCommands.get("ssh");
+		await sshCommand.handler("user@remote.com", ctx);
+
+		const findTool = api._registeredTools.get("find");
+		await findTool.execute("tool-1", { pattern: "*.txt" }, undefined, ctx, undefined);
+
+		const calls = (api.exec as jest.Mock).mock.calls;
+		const findCall = calls[1];
+		expect(findCall[1].some((arg: string) => arg.includes("find "))).toBe(true);
+	});
 });

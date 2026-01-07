@@ -131,4 +131,89 @@ describe("ssh-remote extension - ls tool", () => {
 			expect.objectContaining({ timeout: 60000 })
 		);
 	});
+
+	it("should handle SSH execution errors in ls", async () => {
+		const api = createMockExtensionAPI();
+		const execMock = jest.fn().mockRejectedValue(new Error("SSH connection failed"));
+		api._setExecMock(execMock);
+		extensionFn(api);
+
+		const ctx = createMockContext();
+		const sshCommand = api._registeredCommands.get("ssh");
+		await sshCommand.handler("user@remote.com", ctx);
+
+		const lsTool = api._registeredTools.get("ls");
+		const result = await lsTool.execute("tool-1", { path: "/var" }, undefined, ctx, undefined);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("SSH connection failed");
+		expect(result.details.error).toBe("SSH connection failed");
+	});
+
+	it("should render ls call with host prefix when SSH configured", () => {
+		const api = createMockExtensionAPI();
+		extensionFn(api);
+
+		// Configure SSH
+		const ctx = createMockContext();
+		const sshCommand = api._registeredCommands.get("ssh");
+		sshCommand.handler("user@remote.com", ctx);
+
+		const lsTool = api._registeredTools.get("ls");
+		const mockTheme = {
+			fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+		};
+
+		const rendered = lsTool.renderCall({ path: "/var/log" }, mockTheme);
+		expect(rendered.text).toContain("user@remote.com");
+		expect(rendered.text).toContain("ls /var/log");
+	});
+
+	it("should render ls call without prefix when SSH not configured", () => {
+		const api = createMockExtensionAPI();
+		extensionFn(api);
+
+		const lsTool = api._registeredTools.get("ls");
+		const mockTheme = {
+			fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+		};
+
+		const rendered = lsTool.renderCall({ path: "/var/log" }, mockTheme);
+		expect(rendered.text).not.toContain("@");
+		expect(rendered.text).toContain("ls /var/log");
+	});
+
+	it("should render ls call with default path when no path provided", () => {
+		const api = createMockExtensionAPI();
+		extensionFn(api);
+
+		const lsTool = api._registeredTools.get("ls");
+		const mockTheme = {
+			fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+		};
+
+		const rendered = lsTool.renderCall({}, mockTheme);
+		expect(rendered.text).toContain("ls .");
+	});
+
+	it("should handle ls error with no stderr (remote)", async () => {
+		const api = createMockExtensionAPI();
+		(api.exec as jest.Mock).mockResolvedValue({
+			stdout: "",
+			stderr: "",
+			code: 1,
+		});
+
+		extensionFn(api);
+
+		const sshCommand = api._registeredCommands.get("ssh");
+		const ctx = createMockContext();
+		await sshCommand.handler("user@remote.com", ctx);
+
+		const lsTool = api._registeredTools.get("ls");
+		const result = await lsTool.execute("tool-1", { path: "/nonexistent" }, undefined, ctx, undefined);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("Directory not found");
+	});
 });

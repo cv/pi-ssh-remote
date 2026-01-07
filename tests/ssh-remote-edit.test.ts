@@ -236,4 +236,31 @@ describe("ssh-remote extension - edit tool", () => {
 
 		expect(result.details.lineDelta).toBe(-2);
 	});
+
+	it("should handle SSH execution errors in edit (remote)", async () => {
+		const api = createMockExtensionAPI();
+		const execMock = jest.fn().mockRejectedValue(new Error("Connection reset by peer"));
+		api._setExecMock(execMock);
+		extensionFn(api);
+
+		const ctx = createMockContext();
+
+		// Configure SSH to test remote error handling
+		const sshCommand = api._registeredCommands.get("ssh");
+		await sshCommand.handler("user@server.com", ctx);
+
+		const editTool = api._registeredTools.get("edit");
+
+		const result = await editTool.execute(
+			"tool-1",
+			{ path: "test.txt", oldText: "hello", newText: "goodbye" },
+			undefined,
+			ctx,
+			undefined
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("Connection reset by peer");
+		expect(result.details.error).toBe("Connection reset by peer");
+	});
 });

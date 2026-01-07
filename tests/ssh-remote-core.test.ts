@@ -477,4 +477,222 @@ describe("ssh-remote extension - core", () => {
 			);
 		});
 	});
+
+	describe("/ssh command edge cases", () => {
+		it("should show 'ssh (default)' when querying command with no custom command set", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			// Query command without setting one first
+			await sshCommand.handler("command", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("SSH command: ssh (default)", "info");
+		});
+
+		it("should show current command when querying after setting custom command", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			// Set a custom command first
+			await sshCommand.handler("command tsh ssh", ctx);
+
+			// Clear mocks
+			(ctx.ui.notify as jest.Mock).mockClear();
+
+			// Query command
+			await sshCommand.handler("command", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("SSH command: tsh ssh", "info");
+		});
+
+		it("should show 'not set' when querying timeout with no timeout configured", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			// Query timeout without setting one first
+			await sshCommand.handler("timeout", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("SSH timeout: not set (no default timeout)", "info");
+		});
+
+		it("should show 'not set' when querying cwd with no cwd configured", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			// Query cwd without setting one first
+			await sshCommand.handler("cwd", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("SSH working directory: not set", "info");
+		});
+
+		it("should reject negative timeout values", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			await sshCommand.handler("timeout -5", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("Invalid timeout number. Use: /ssh timeout <seconds>", "error");
+		});
+
+		it("should reject zero timeout value", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			const ctx = createMockContext();
+			const sshCommand = api._registeredCommands.get("ssh");
+
+			await sshCommand.handler("timeout 0", ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith("Invalid timeout number. Use: /ssh timeout <seconds>", "error");
+		});
+	});
+
+	describe("CLI flag validation", () => {
+		it("should warn about invalid port from CLI flag", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			// Set invalid port via CLI flag
+			api._registeredFlags.get("ssh-host")!.value = "user@host.com";
+			api._registeredFlags.get("ssh-port")!.value = "99999";
+
+			const ctx = createMockContext();
+
+			// Trigger session_start
+			const handlers = api._eventHandlers.get("session_start")!;
+			for (const handler of handlers) {
+				await handler({}, ctx);
+			}
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith(
+				"Invalid SSH port '99999' ignored. Use a value between 1-65535.",
+				"warning"
+			);
+		});
+
+		it("should warn about non-numeric port from CLI flag", async () => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			// Set non-numeric port via CLI flag
+			api._registeredFlags.get("ssh-host")!.value = "user@host.com";
+			api._registeredFlags.get("ssh-port")!.value = "abc";
+
+			const ctx = createMockContext();
+
+			// Trigger session_start
+			const handlers = api._eventHandlers.get("session_start")!;
+			for (const handler of handlers) {
+				await handler({}, ctx);
+			}
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith(
+				"Invalid SSH port 'abc' ignored. Use a value between 1-65535.",
+				"warning"
+			);
+		});
+
+		it("should use custom command with port from CLI flags", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest.fn().mockResolvedValue({
+				stdout: "output",
+				stderr: "",
+				code: 0,
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			// Set CLI flags including custom command and port
+			api._registeredFlags.get("ssh-host")!.value = "user@host.com";
+			api._registeredFlags.get("ssh-port")!.value = "2222";
+			api._registeredFlags.get("ssh-command")!.value = "tsh ssh";
+
+			const ctx = createMockContext();
+
+			// Trigger session_start
+			const handlers = api._eventHandlers.get("session_start")!;
+			for (const handler of handlers) {
+				await handler({}, ctx);
+			}
+
+			// Execute bash command to verify the SSH prefix
+			const bashTool = api._registeredTools.get("bash");
+			await bashTool.execute("tool-1", { command: "ls" }, undefined, ctx, undefined);
+
+			// Should use custom command with port
+			expect(execMock).toHaveBeenCalledWith(
+				"tsh",
+				expect.arrayContaining(["ssh", "-p", "2222", "user@host.com"]),
+				expect.any(Object)
+			);
+		});
+	});
+
+	describe("error message handling", () => {
+		it("should handle non-Error objects in catch blocks", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest.fn().mockRejectedValue("string error");
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Configure SSH
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
+			const bashTool = api._registeredTools.get("bash");
+			const result = await bashTool.execute("tool-1", { command: "ls" }, undefined, ctx, undefined);
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("string error");
+		});
+	});
+
+	describe("remote tool detection edge cases", () => {
+		it("should handle detection command failure gracefully", async () => {
+			const api = createMockExtensionAPI();
+			let callCount = 0;
+			const execMock = jest.fn().mockImplementation(() => {
+				callCount++;
+				if (callCount === 1) {
+					// Detection fails
+					return Promise.reject(new Error("Connection refused"));
+				}
+				// Subsequent calls succeed
+				return Promise.resolve({ stdout: "result\n", stderr: "", code: 0 });
+			});
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			const ctx = createMockContext();
+
+			// Configure SSH
+			const sshCommand = api._registeredCommands.get("ssh");
+			await sshCommand.handler("user@server.com", ctx);
+
+			const grepTool = api._registeredTools.get("grep");
+			await grepTool.execute("tool-1", { pattern: "test" }, undefined, ctx, undefined);
+
+			// Should fall back to grep (not rg) and still work
+			const calls = execMock.mock.calls;
+			const grepCall = calls[1];
+			expect(grepCall[1].some((arg: string) => arg.includes("grep "))).toBe(true);
+		});
+	});
 });

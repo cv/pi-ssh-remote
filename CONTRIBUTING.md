@@ -5,8 +5,35 @@ Thank you for your interest in contributing!
 ## Project Structure
 
 ```
-├── ssh-remote.ts           # Main extension (tools + /ssh command)
-├── ssh-remote.test.ts      # Unit tests
+├── index.ts                   # Main entry point (re-exports src/)
+├── src/
+│   ├── index.ts               # Extension entry point
+│   ├── types.ts               # TypeScript interfaces
+│   ├── state.ts               # SSH state management
+│   ├── flags.ts               # CLI flag registration
+│   ├── command.ts             # /ssh command handler
+│   ├── lifecycle.ts           # Session lifecycle handlers
+│   └── tools/
+│       ├── index.ts           # Tool exports
+│       ├── bash.ts            # Bash tool
+│       ├── read.ts            # Read tool
+│       ├── write.ts           # Write tool
+│       ├── edit.ts            # Edit tool
+│       ├── grep.ts            # Grep tool
+│       ├── find.ts            # Find tool
+│       └── ls.ts              # Ls tool
+├── tests/                     # Unit tests
+│   ├── setup.ts               # Jest setup and mocks
+│   ├── test-utils.ts          # Shared test utilities
+│   ├── ssh-remote-core.test.ts
+│   ├── ssh-remote-bash.test.ts
+│   ├── ssh-remote-read.test.ts
+│   ├── ssh-remote-write.test.ts
+│   ├── ssh-remote-edit.test.ts
+│   ├── ssh-remote-grep.test.ts
+│   ├── ssh-remote-find.test.ts
+│   ├── ssh-remote-ls.test.ts
+│   └── ssh-remote-rendering.test.ts
 └── e2e/
     └── ssh-tools.e2e.test.ts  # End-to-end tests (Docker-based)
 ```
