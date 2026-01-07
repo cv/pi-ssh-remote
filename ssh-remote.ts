@@ -21,12 +21,16 @@ import { Type } from "@sinclair/typebox";
 interface SSHConfig {
 	host: string | null;
 	remoteCwd: string | null;
+	port: number | null;
+	command: string | null;
 }
 
 export default function sshRemoteExtension(pi: ExtensionAPI) {
 	// Current SSH configuration
 	let sshHost: string | null = null;
 	let remoteCwd: string | null = null;
+	let sshPort: number | null = null;
+	let sshCommand: string | null = null; // Custom SSH command (e.g., "tsh ssh" for Teleport)
 
 	// Register CLI flags for SSH configuration
 	pi.registerFlag("ssh-host", {
@@ -39,19 +43,33 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		type: "string",
 	});
 
+	pi.registerFlag("ssh-port", {
+		description: "SSH port (default: 22)",
+		type: "string", // Using string to parse as number later
+	});
+
+	pi.registerFlag("ssh-command", {
+		description: "Custom SSH command (e.g., 'tsh ssh' for Teleport)",
+		type: "string",
+	});
+
 	// Persist current state
 	function persistState() {
 		pi.appendEntry<SSHConfig>("ssh-remote-config", {
 			host: sshHost,
 			remoteCwd: remoteCwd,
+			port: sshPort,
+			command: sshCommand,
 		});
 	}
 
 	// Update status line
 	function updateStatus(ctx: ExtensionContext) {
 		if (sshHost) {
+			const portInfo = sshPort ? `:${sshPort}` : "";
 			const cwdInfo = remoteCwd ? ` (${remoteCwd})` : "";
-			ctx.ui.setStatus("ssh-remote", `🔗 SSH: ${sshHost}${cwdInfo}`);
+			const cmdInfo = sshCommand ? ` [${sshCommand.split(" ")[0]}]` : "";
+			ctx.ui.setStatus("ssh-remote", `🔗 SSH: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}`);
 		} else {
 			ctx.ui.setStatus("ssh-remote", undefined);
 		}
@@ -67,6 +85,8 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 				if (data) {
 					sshHost = data.host;
 					remoteCwd = data.remoteCwd;
+					sshPort = data.port;
+					sshCommand = data.command;
 				}
 			}
 		}
@@ -83,6 +103,20 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	// Helper to build SSH command prefix
 	function sshPrefix(): string[] {
 		if (!sshHost) return [];
+		
+		// Use custom command if specified (e.g., "tsh ssh" for Teleport)
+		if (sshCommand) {
+			const parts = sshCommand.split(/\s+/);
+			if (sshPort) {
+				return [...parts, "-p", String(sshPort), sshHost];
+			}
+			return [...parts, sshHost];
+		}
+		
+		// Default SSH command
+		if (sshPort) {
+			return ["ssh", "-p", String(sshPort), sshHost];
+		}
 		return ["ssh", sshHost];
 	}
 
@@ -96,15 +130,17 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 	// Register /ssh command to configure remote host
 	pi.registerCommand("ssh", {
-		description: "Configure SSH remote host. Usage: /ssh user@host [remote-cwd] or /ssh off",
+		description: "Configure SSH remote. Usage: /ssh user@host [cwd] | /ssh port <port> | /ssh command <cmd> | /ssh off",
 		handler: async (args, ctx) => {
 			const parts = args?.trim().split(/\s+/) || [];
 
 			if (!args?.trim() || parts.length === 0) {
 				// Show current config
 				if (sshHost) {
-					const cwdInfo = remoteCwd ? ` with cwd: ${remoteCwd}` : "";
-					ctx.ui.notify(`SSH remote: ${sshHost}${cwdInfo}`, "info");
+					const portInfo = sshPort ? ` port: ${sshPort}` : "";
+					const cwdInfo = remoteCwd ? ` cwd: ${remoteCwd}` : "";
+					const cmdInfo = sshCommand ? ` command: ${sshCommand}` : "";
+					ctx.ui.notify(`SSH remote: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}`, "info");
 				} else {
 					ctx.ui.notify("SSH remote: disabled", "info");
 				}
@@ -114,20 +150,55 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			if (parts[0] === "off" || parts[0] === "disable") {
 				sshHost = null;
 				remoteCwd = null;
+				sshPort = null;
+				sshCommand = null;
 				persistState();
 				updateStatus(ctx);
 				ctx.ui.notify("SSH remote disabled", "info");
 				return;
 			}
 
-			// Set new host
+			// Handle subcommands: /ssh port <port>, /ssh command <cmd>
+			if (parts[0] === "port") {
+				const port = parseInt(parts[1], 10);
+				if (isNaN(port) || port < 1 || port > 65535) {
+					ctx.ui.notify("Invalid port number. Use: /ssh port <1-65535>", "error");
+					return;
+				}
+				sshPort = port;
+				persistState();
+				updateStatus(ctx);
+				ctx.ui.notify(`SSH port set to: ${port}`, "info");
+				return;
+			}
+
+			if (parts[0] === "command" || parts[0] === "cmd") {
+				if (parts.length < 2) {
+					if (sshCommand) {
+						ctx.ui.notify(`SSH command: ${sshCommand}`, "info");
+					} else {
+						ctx.ui.notify("SSH command: ssh (default)", "info");
+					}
+					return;
+				}
+				// Join remaining parts as the command (e.g., "tsh ssh")
+				sshCommand = parts.slice(1).join(" ");
+				persistState();
+				updateStatus(ctx);
+				ctx.ui.notify(`SSH command set to: ${sshCommand}`, "info");
+				return;
+			}
+
+			// Set new host (and optionally cwd)
 			sshHost = parts[0];
 			remoteCwd = parts[1] || null;
 			persistState();
 			updateStatus(ctx);
 
-			const cwdInfo = remoteCwd ? ` with cwd: ${remoteCwd}` : "";
-			ctx.ui.notify(`SSH remote set to: ${sshHost}${cwdInfo}`, "info");
+			const portInfo = sshPort ? ` port: ${sshPort}` : "";
+			const cwdInfo = remoteCwd ? ` cwd: ${remoteCwd}` : "";
+			const cmdInfo = sshCommand ? ` via: ${sshCommand}` : "";
+			ctx.ui.notify(`SSH remote set to: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}`, "info");
 		},
 	});
 
@@ -884,13 +955,21 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		// Check for CLI flags first (they take precedence over session state)
 		const cliHost = pi.getFlag("ssh-host") as string | undefined;
 		const cliCwd = pi.getFlag("ssh-cwd") as string | undefined;
+		const cliPort = pi.getFlag("ssh-port") as string | undefined;
+		const cliCommand = pi.getFlag("ssh-command") as string | undefined;
 
 		if (cliHost) {
 			sshHost = cliHost;
 			remoteCwd = cliCwd || null;
+			sshPort = cliPort ? parseInt(cliPort, 10) : null;
+			sshCommand = cliCommand || null;
 			persistState();
 			updateStatus(ctx);
-			ctx.ui.notify(`SSH remote configured via CLI: ${sshHost}${remoteCwd ? ` (${remoteCwd})` : ""}`, "info");
+			
+			const portInfo = sshPort ? `:${sshPort}` : "";
+			const cwdInfo = remoteCwd ? ` (${remoteCwd})` : "";
+			const cmdInfo = sshCommand ? ` via ${sshCommand}` : "";
+			ctx.ui.notify(`SSH remote configured via CLI: ${sshHost}${portInfo}${cwdInfo}${cmdInfo}`, "info");
 		} else {
 			restoreFromBranch(ctx);
 		}

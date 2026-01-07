@@ -48,6 +48,8 @@ Once pi starts with the extension loaded, use the `/ssh` command:
 ```
 /ssh user@example.com              # Set remote host
 /ssh user@example.com /path/to/dir # Set remote host + working directory
+/ssh port 2222                     # Set custom port
+/ssh command tsh ssh               # Set custom SSH command (e.g., Teleport)
 /ssh                               # Show current configuration
 /ssh off                           # Disable remote mode
 ```
@@ -59,6 +61,8 @@ You can also configure the SSH remote directly from the command line:
 ```bash
 pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com
 pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-cwd /path/to/project
+pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-port 2222
+pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-command "tsh ssh"
 ```
 
 ### Example session
@@ -67,10 +71,17 @@ pi --tools '' -e ./ssh-remote.ts --ssh-host user@example.com --ssh-cwd /path/to/
 # Start pi with the extension and SSH preconfigured
 pi --tools '' -e ./ssh-remote.ts --ssh-host myuser@myserver.com --ssh-cwd /home/myuser/project
 
+# With custom port:
+pi --tools '' -e ./ssh-remote.ts --ssh-host myuser@myserver.com --ssh-port 2222
+
+# With Teleport:
+pi --tools '' -e ./ssh-remote.ts --ssh-host myuser@myserver.com --ssh-command "tsh ssh"
+
 # Or start without SSH and configure later with /ssh command:
 pi --tools '' -e ./ssh-remote.ts
 # Then in pi:
 /ssh myuser@myserver.com /home/myuser/project
+/ssh port 2222
 ```
 
 ## Features
@@ -87,9 +98,13 @@ pi --tools '' -e ./ssh-remote.ts
 - **Session persistence** - Configuration persists across session reloads and branching
 
 - **UI integration**:
-  - Shows status in footer: `🔗 SSH: user@host (cwd)`
+  - Shows status in footer: `🔗 SSH: user@host:port (cwd) [command]`
   - Tool calls show `[user@host]` prefix
   - Tool results show `[remote]` prefix
+
+- **Flexible connection options**:
+  - Custom port via `--ssh-port` or `/ssh port`
+  - Custom SSH command via `--ssh-command` or `/ssh command` (for Teleport, bastion hosts, etc.)
 
 - **Large file support** - Uses chunked base64 encoding for files that exceed shell argument limits
 

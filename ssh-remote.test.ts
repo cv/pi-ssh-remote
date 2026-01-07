@@ -121,7 +121,7 @@ describe("ssh-remote extension", () => {
       extensionFn(api);
 
       expect(api._registeredCommands.has("ssh")).toBe(true);
-      expect(api._registeredCommands.get("ssh").description).toContain("SSH remote host");
+      expect(api._registeredCommands.get("ssh").description).toContain("SSH remote");
     });
 
     it("should register all seven tools", () => {
@@ -179,6 +179,8 @@ describe("ssh-remote extension", () => {
       expect(api.appendEntry).toHaveBeenCalledWith("ssh-remote-config", {
         host: "user@example.com",
         remoteCwd: null,
+        port: null,
+        command: null,
       });
     });
 
@@ -192,12 +194,14 @@ describe("ssh-remote extension", () => {
       await sshCommand.handler("user@example.com /home/user/project", ctx);
       
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        "SSH remote set to: user@example.com with cwd: /home/user/project",
+        "SSH remote set to: user@example.com cwd: /home/user/project",
         "info"
       );
       expect(api.appendEntry).toHaveBeenCalledWith("ssh-remote-config", {
         host: "user@example.com",
         remoteCwd: "/home/user/project",
+        port: null,
+        command: null,
       });
     });
 
@@ -216,6 +220,107 @@ describe("ssh-remote extension", () => {
 
       expect(ctx.ui.notify).toHaveBeenLastCalledWith("SSH remote disabled", "info");
       expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("ssh-remote", undefined);
+    });
+
+    it("should set SSH port with 'port' subcommand", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      await sshCommand.handler("port 2222", ctx);
+
+      expect(ctx.ui.notify).toHaveBeenCalledWith("SSH port set to: 2222", "info");
+      expect(api.appendEntry).toHaveBeenCalledWith("ssh-remote-config", expect.objectContaining({
+        port: 2222,
+      }));
+    });
+
+    it("should reject invalid port numbers", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      await sshCommand.handler("port invalid", ctx);
+
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid port"),
+        "error"
+      );
+    });
+
+    it("should set custom SSH command with 'command' subcommand", async () => {
+      const api = createMockExtensionAPI();
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+
+      await sshCommand.handler("command tsh ssh", ctx);
+
+      expect(ctx.ui.notify).toHaveBeenCalledWith("SSH command set to: tsh ssh", "info");
+      expect(api.appendEntry).toHaveBeenCalledWith("ssh-remote-config", expect.objectContaining({
+        command: "tsh ssh",
+      }));
+    });
+
+    it("should include port in SSH command when configured", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "output",
+        stderr: "",
+        code: 0,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+      
+      // Configure host and port
+      await sshCommand.handler("user@example.com", ctx);
+      await sshCommand.handler("port 2222", ctx);
+
+      // Execute bash command
+      const bashTool = api._registeredTools.get("bash");
+      await bashTool.execute("tool-1", { command: "ls" }, undefined, ctx, undefined);
+
+      expect(execMock).toHaveBeenCalledWith(
+        "ssh",
+        expect.arrayContaining(["-p", "2222", "user@example.com"]),
+        expect.any(Object)
+      );
+    });
+
+    it("should use custom command when configured", async () => {
+      const api = createMockExtensionAPI();
+      const execMock = jest.fn().mockResolvedValue({
+        stdout: "output",
+        stderr: "",
+        code: 0,
+      });
+      api._setExecMock(execMock);
+      extensionFn(api);
+
+      const ctx = createMockContext();
+      const sshCommand = api._registeredCommands.get("ssh");
+      
+      // Configure host and custom command
+      await sshCommand.handler("user@example.com", ctx);
+      await sshCommand.handler("command tsh ssh", ctx);
+
+      // Execute bash command
+      const bashTool = api._registeredTools.get("bash");
+      await bashTool.execute("tool-1", { command: "ls" }, undefined, ctx, undefined);
+
+      expect(execMock).toHaveBeenCalledWith(
+        "tsh",
+        expect.arrayContaining(["ssh", "user@example.com"]),
+        expect.any(Object)
+      );
     });
   });
 
@@ -1335,7 +1440,7 @@ describe("ssh-remote extension", () => {
       await sshCommand.handler("", ctx);
 
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        "SSH remote: user@server.com with cwd: /home/user",
+        "SSH remote: user@server.com cwd: /home/user",
         "info"
       );
     });
