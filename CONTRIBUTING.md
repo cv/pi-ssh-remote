@@ -25,10 +25,12 @@ npm install
 npm test        # Verify setup with unit tests
 ```
 
-## Running Tests & Linting
+## Running Tests, Linting & Formatting
 
 | Command | Description |
 |---------|-------------|
+| `npm run format` | Format code with Prettier |
+| `npm run format:check` | Check formatting without changes |
 | `npm run lint` | Run ESLint (strict TypeScript + security rules) |
 | `npm run lint:fix` | Auto-fix lint issues |
 | `npm test` | Unit tests only (fast, no Docker) |
@@ -36,7 +38,15 @@ npm test        # Verify setup with unit tests
 | `npm run test:coverage` | Unit tests with coverage |
 | `npm run test:e2e` | E2E tests (requires Docker) |
 | `npm run test:all` | Both unit and e2e tests |
-| `npm run check` | **Full check: lint + all tests** |
+| `npm run check` | **Full check: format + lint + all tests** |
+
+### Pre-commit Hook
+
+A pre-commit hook automatically runs on every commit:
+1. Formats and lints staged `.ts` files
+2. Runs unit tests
+
+This ensures code quality before changes are committed.
 
 ### About E2E Tests
 

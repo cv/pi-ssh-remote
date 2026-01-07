@@ -1,0 +1,5 @@
+# Format and lint staged files
+npx lint-staged
+
+# Run unit tests (fast feedback)
+npm test

@@ -11,7 +11,7 @@
  * Run with: npm run test:e2e
  */
 
-import { execSync, spawn } from "child_process";
+import { execSync } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -30,19 +30,19 @@ let DOCKER_CONTAINER: string;
  * Find an available port
  */
 function getAvailablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (address && typeof address === "object") {
-        const port = address.port;
-        server.close(() => resolve(port));
-      } else {
-        server.close(() => reject(new Error("Could not get port")));
-      }
-    });
-    server.on("error", reject);
-  });
+	return new Promise((resolve, reject) => {
+		const server = net.createServer();
+		server.listen(0, "127.0.0.1", () => {
+			const address = server.address();
+			if (address && typeof address === "object") {
+				const port = address.port;
+				server.close(() => resolve(port));
+			} else {
+				server.close(() => reject(new Error("Could not get port")));
+			}
+		});
+		server.on("error", reject);
+	});
 }
 
 // Timeouts
@@ -53,10 +53,10 @@ const SSH_COMMAND_TIMEOUT = 10000;
 const TEST_DIR = path.resolve(__dirname);
 
 interface SSHConfig {
-  host: string;
-  port: number;
-  user: string;
-  keyPath: string;
+	host: string;
+	port: number;
+	user: string;
+	keyPath: string;
 }
 
 let sshConfig: SSHConfig;
@@ -66,58 +66,55 @@ let tempDir: string;
  * Sleep helper
  */
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
  * Execute SSH command and return result
  */
-function sshExec(
-  command: string,
-  config: SSHConfig = sshConfig
-): { stdout: string; stderr: string; code: number } {
-  try {
-    const sshArgs = [
-      "-o",
-      "StrictHostKeyChecking=no",
-      "-o",
-      "UserKnownHostsFile=/dev/null",
-      "-o",
-      "BatchMode=yes",
-      "-i",
-      config.keyPath,
-      "-p",
-      String(config.port),
-      `${config.user}@${config.host}`,
-      command,
-    ];
-    const stdout = execSync(`ssh ${sshArgs.map((a) => `"${a}"`).join(" ")}`, {
-      encoding: "utf-8",
-      timeout: SSH_COMMAND_TIMEOUT,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return { stdout, stderr: "", code: 0 };
-  } catch (err: any) {
-    return {
-      stdout: err.stdout?.toString() || "",
-      stderr: err.stderr?.toString() || "",
-      code: err.status || 1,
-    };
-  }
+function sshExec(command: string, config: SSHConfig = sshConfig): { stdout: string; stderr: string; code: number } {
+	try {
+		const sshArgs = [
+			"-o",
+			"StrictHostKeyChecking=no",
+			"-o",
+			"UserKnownHostsFile=/dev/null",
+			"-o",
+			"BatchMode=yes",
+			"-i",
+			config.keyPath,
+			"-p",
+			String(config.port),
+			`${config.user}@${config.host}`,
+			command,
+		];
+		const stdout = execSync(`ssh ${sshArgs.map((a) => `"${a}"`).join(" ")}`, {
+			encoding: "utf-8",
+			timeout: SSH_COMMAND_TIMEOUT,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		return { stdout, stderr: "", code: 0 };
+	} catch (err: any) {
+		return {
+			stdout: err.stdout?.toString() || "",
+			stderr: err.stderr?.toString() || "",
+			code: err.status || 1,
+		};
+	}
 }
 
 /**
  * Escape for shell (matching extension's escapeForShell)
  */
 function escapeForShell(str: string): string {
-  return "'" + str.replace(/'/g, "'\\''") + "'";
+	return "'" + str.replace(/'/g, "'\\''") + "'";
 }
 
 /**
  * Build Docker image with SSH server
  */
 function buildDockerImage(): void {
-  const dockerfile = `
+	const dockerfile = `
 FROM ubuntu:22.04
 
 # Install SSH server and basic utilities
@@ -152,605 +149,517 @@ EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
 `;
 
-  // Write Dockerfile
-  const dockerfilePath = path.join(TEST_DIR, "Dockerfile.ssh-tools");
-  fs.writeFileSync(dockerfilePath, dockerfile);
+	// Write Dockerfile
+	const dockerfilePath = path.join(TEST_DIR, "Dockerfile.ssh-tools");
+	fs.writeFileSync(dockerfilePath, dockerfile);
 
-  try {
-    execSync(
-      `docker build -t ${DOCKER_IMAGE} -f ${dockerfilePath} ${TEST_DIR}`,
-      {
-        stdio: "inherit",
-      }
-    );
-  } finally {
-    // Clean up Dockerfile
-    try {
-      fs.unlinkSync(dockerfilePath);
-    } catch {}
-  }
+	try {
+		execSync(`docker build -t ${DOCKER_IMAGE} -f ${dockerfilePath} ${TEST_DIR}`, {
+			stdio: "inherit",
+		});
+	} finally {
+		// Clean up Dockerfile
+		try {
+			fs.unlinkSync(dockerfilePath);
+		} catch {
+			// Ignore cleanup errors
+		}
+	}
 }
 
 /**
  * Start Docker container
  */
 function startDockerContainer(): void {
-  // Stop any existing container
-  try {
-    execSync(`docker rm -f ${DOCKER_CONTAINER}`, { stdio: "pipe" });
-  } catch {
-    // Container may not exist
-  }
+	// Stop any existing container
+	try {
+		execSync(`docker rm -f ${DOCKER_CONTAINER}`, { stdio: "pipe" });
+	} catch {
+		// Container may not exist
+	}
 
-  // Start new container
-  execSync(
-    `docker run -d --name ${DOCKER_CONTAINER} -p ${SSH_PORT}:22 ${DOCKER_IMAGE}`,
-    { stdio: "inherit" }
-  );
+	// Start new container
+	execSync(`docker run -d --name ${DOCKER_CONTAINER} -p ${SSH_PORT}:22 ${DOCKER_IMAGE}`, { stdio: "inherit" });
 }
 
 /**
  * Wait for SSH to be ready
  */
 async function waitForSSH(): Promise<void> {
-  const start = Date.now();
+	const start = Date.now();
 
-  // First, check if sshpass is available
-  try {
-    execSync("which sshpass", { stdio: "pipe" });
-  } catch {
-    console.warn("sshpass not found - attempting to install via brew");
-    try {
-      execSync("brew install hudochenkov/sshpass/sshpass", { stdio: "inherit" });
-    } catch {
-      throw new Error("Could not install sshpass. Please install it manually.");
-    }
-  }
+	// First, check if sshpass is available
+	try {
+		execSync("which sshpass", { stdio: "pipe" });
+	} catch {
+		console.warn("sshpass not found - attempting to install via brew");
+		try {
+			execSync("brew install hudochenkov/sshpass/sshpass", { stdio: "inherit" });
+		} catch {
+			throw new Error("Could not install sshpass. Please install it manually.");
+		}
+	}
 
-  while (Date.now() - start < DOCKER_STARTUP_TIMEOUT) {
-    try {
-      execSync(
-        `sshpass -p ${SSH_PASSWORD} ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 -p ${SSH_PORT} ${SSH_USER}@localhost echo ok`,
-        { stdio: "pipe" }
-      );
-      return;
-    } catch {
-      await sleep(500);
-    }
-  }
-  throw new Error("SSH server did not start in time");
+	while (Date.now() - start < DOCKER_STARTUP_TIMEOUT) {
+		try {
+			execSync(
+				`sshpass -p ${SSH_PASSWORD} ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 -p ${SSH_PORT} ${SSH_USER}@localhost echo ok`,
+				{ stdio: "pipe" }
+			);
+			return;
+		} catch {
+			await sleep(500);
+		}
+	}
+	throw new Error("SSH server did not start in time");
 }
 
 /**
  * Stop Docker container
  */
 function stopDockerContainer(): void {
-  try {
-    execSync(`docker rm -f ${DOCKER_CONTAINER}`, { stdio: "pipe" });
-  } catch {
-    // Ignore errors
-  }
+	try {
+		execSync(`docker rm -f ${DOCKER_CONTAINER}`, { stdio: "pipe" });
+	} catch {
+		// Ignore errors
+	}
 }
 
 /**
  * Setup SSH keys for passwordless auth
  */
 function setupSSHKeys(): SSHConfig {
-  // Create a temporary directory for SSH keys
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-ssh-tools-test-"));
-  const keyPath = path.join(tempDir, "id_rsa");
+	// Create a temporary directory for SSH keys
+	tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-ssh-tools-test-"));
+	const keyPath = path.join(tempDir, "id_rsa");
 
-  // Generate SSH key
-  execSync(`ssh-keygen -t rsa -N "" -f ${keyPath}`, { stdio: "pipe" });
+	// Generate SSH key
+	execSync(`ssh-keygen -t rsa -N "" -f ${keyPath}`, { stdio: "pipe" });
 
-  // Copy public key to container
-  const pubKey = fs.readFileSync(`${keyPath}.pub`, "utf-8").trim();
-  execSync(
-    `docker exec ${DOCKER_CONTAINER} bash -c "mkdir -p /home/${SSH_USER}/.ssh && echo '${pubKey}' >> /home/${SSH_USER}/.ssh/authorized_keys && chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.ssh && chmod 700 /home/${SSH_USER}/.ssh && chmod 600 /home/${SSH_USER}/.ssh/authorized_keys"`,
-    { stdio: "pipe" }
-  );
+	// Copy public key to container
+	const pubKey = fs.readFileSync(`${keyPath}.pub`, "utf-8").trim();
+	execSync(
+		`docker exec ${DOCKER_CONTAINER} bash -c "mkdir -p /home/${SSH_USER}/.ssh && echo '${pubKey}' >> /home/${SSH_USER}/.ssh/authorized_keys && chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.ssh && chmod 700 /home/${SSH_USER}/.ssh && chmod 600 /home/${SSH_USER}/.ssh/authorized_keys"`,
+		{ stdio: "pipe" }
+	);
 
-  return {
-    host: "localhost",
-    port: SSH_PORT,
-    user: SSH_USER,
-    keyPath,
-  };
+	return {
+		host: "localhost",
+		port: SSH_PORT,
+		user: SSH_USER,
+		keyPath,
+	};
 }
 
 describe("SSH Tools E2E Tests", () => {
-  beforeAll(async () => {
-    // Check prerequisites
-    try {
-      execSync("which docker", { stdio: "pipe" });
-    } catch {
-      throw new Error("Docker is required for E2E tests");
-    }
+	beforeAll(async () => {
+		// Check prerequisites
+		try {
+			execSync("which docker", { stdio: "pipe" });
+		} catch {
+			throw new Error("Docker is required for E2E tests");
+		}
 
-    // Get a random available port for this test run
-    SSH_PORT = await getAvailablePort();
-    DOCKER_CONTAINER = `pi-ssh-tools-test-${SSH_PORT}`;
-    console.log(`Using port ${SSH_PORT} for this test run`);
+		// Get a random available port for this test run
+		SSH_PORT = await getAvailablePort();
+		DOCKER_CONTAINER = `pi-ssh-tools-test-${SSH_PORT}`;
+		console.log(`Using port ${SSH_PORT} for this test run`);
 
-    console.log("Building Docker image...");
-    buildDockerImage();
+		console.log("Building Docker image...");
+		buildDockerImage();
 
-    console.log("Starting Docker container...");
-    startDockerContainer();
+		console.log("Starting Docker container...");
+		startDockerContainer();
 
-    console.log("Waiting for SSH to be ready...");
-    await waitForSSH();
+		console.log("Waiting for SSH to be ready...");
+		await waitForSSH();
 
-    console.log("Setting up SSH keys...");
-    sshConfig = setupSSHKeys();
+		console.log("Setting up SSH keys...");
+		sshConfig = setupSSHKeys();
 
-    // Verify SSH connection works
-    const result = sshExec("echo 'SSH connection test'");
-    if (result.code !== 0) {
-      throw new Error(`SSH connection failed: ${result.stderr}`);
-    }
-    console.log("SSH connection verified!");
-  }, 120000);
+		// Verify SSH connection works
+		const result = sshExec("echo 'SSH connection test'");
+		if (result.code !== 0) {
+			throw new Error(`SSH connection failed: ${result.stderr}`);
+		}
+		console.log("SSH connection verified!");
+	}, 120000);
 
-  afterAll(() => {
-    stopDockerContainer();
+	afterAll(() => {
+		stopDockerContainer();
 
-    // Clean up temp directory
-    if (tempDir) {
-      try {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      } catch {}
-    }
-  });
+		// Clean up temp directory
+		if (tempDir) {
+			try {
+				fs.rmSync(tempDir, { recursive: true, force: true });
+			} catch {
+				// Ignore cleanup errors
+			}
+		}
+	});
 
-  describe("bash-equivalent: remote command execution", () => {
-    it("should execute simple commands", () => {
-      const result = sshExec("echo 'hello world'");
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("hello world");
-    });
+	describe("bash-equivalent: remote command execution", () => {
+		it("should execute simple commands", () => {
+			const result = sshExec("echo 'hello world'");
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("hello world");
+		});
 
-    it("should execute commands in specified directory", () => {
-      const result = sshExec(
-        `cd /home/${SSH_USER}/project && pwd`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe(`/home/${SSH_USER}/project`);
-    });
+		it("should execute commands in specified directory", () => {
+			const result = sshExec(`cd /home/${SSH_USER}/project && pwd`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe(`/home/${SSH_USER}/project`);
+		});
 
-    it("should capture exit codes", () => {
-      const result = sshExec("exit 42");
-      expect(result.code).toBe(42);
-    });
+		it("should capture exit codes", () => {
+			const result = sshExec("exit 42");
+			expect(result.code).toBe(42);
+		});
 
-    it("should handle commands with stderr output", () => {
-      // Test that we can execute commands that produce stderr
-      // Note: With BatchMode=yes and key-based auth, SSH may handle stderr differently
-      // The important thing is the command executes and we can detect failure
-      const result = sshExec("ls /nonexistent_directory_xyz 2>&1");
-      expect(result.code).not.toBe(0);
-      // Output should mention the missing directory
-      expect(result.stdout + result.stderr).toMatch(/no such file|not found|cannot access/i);
-    });
+		it("should handle commands with stderr output", () => {
+			// Test that we can execute commands that produce stderr
+			// Note: With BatchMode=yes and key-based auth, SSH may handle stderr differently
+			// The important thing is the command executes and we can detect failure
+			const result = sshExec("ls /nonexistent_directory_xyz 2>&1");
+			expect(result.code).not.toBe(0);
+			// Output should mention the missing directory
+			expect(result.stdout + result.stderr).toMatch(/no such file|not found|cannot access/i);
+		});
 
-    it("should handle pipes and redirections", () => {
-      const result = sshExec("echo 'test' | cat | tr 't' 'T'");
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("TesT");
-    });
-  });
+		it("should handle pipes and redirections", () => {
+			const result = sshExec("echo 'test' | cat | tr 't' 'T'");
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("TesT");
+		});
+	});
 
-  describe("read-equivalent: remote file reading", () => {
-    it("should read file contents", () => {
-      const result = sshExec(
-        `cat /home/${SSH_USER}/project/test.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("Hello from test file");
-    });
+	describe("read-equivalent: remote file reading", () => {
+		it("should read file contents", () => {
+			const result = sshExec(`cat /home/${SSH_USER}/project/test.txt`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("Hello from test file");
+		});
 
-    it("should read with offset and limit (sed)", () => {
-      // Read lines 3-5 (offset=3, limit=3)
-      const result = sshExec(
-        `sed -n '3,5p' /home/${SSH_USER}/project/multiline.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("line3\nline4\nline5");
-    });
+		it("should read with offset and limit (sed)", () => {
+			// Read lines 3-5 (offset=3, limit=3)
+			const result = sshExec(`sed -n '3,5p' /home/${SSH_USER}/project/multiline.txt`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("line3\nline4\nline5");
+		});
 
-    it("should read from offset to end (sed)", () => {
-      // Create a known file for this test
-      sshExec(`printf 'line1\\nline2\\nline3\\nline4\\nline5\\n' > /home/${SSH_USER}/project/offset_test.txt`);
-      
-      // Read from line 3 to end
-      const result = sshExec(
-        `sed -n '3,\\$p' /home/${SSH_USER}/project/offset_test.txt`
-      );
-      expect(result.code).toBe(0);
-      // Should have lines 3, 4, 5
-      const lines = result.stdout.trim().split("\n");
-      expect(lines.length).toBe(3);
-      expect(lines[0]).toBe("line3");
-    });
+		it("should read from offset to end (sed)", () => {
+			// Create a known file for this test
+			sshExec(`printf 'line1\\nline2\\nline3\\nline4\\nline5\\n' > /home/${SSH_USER}/project/offset_test.txt`);
 
-    it("should handle file not found", () => {
-      const result = sshExec(
-        `cat /home/${SSH_USER}/project/nonexistent.txt`
-      );
-      expect(result.code).not.toBe(0);
-      expect(result.stderr).toMatch(/no such file|not found/i);
-    });
+			// Read from line 3 to end
+			const result = sshExec(`sed -n '3,\\$p' /home/${SSH_USER}/project/offset_test.txt`);
+			expect(result.code).toBe(0);
+			// Should have lines 3, 4, 5
+			const lines = result.stdout.trim().split("\n");
+			expect(lines.length).toBe(3);
+			expect(lines[0]).toBe("line3");
+		});
 
-    it("should handle special characters in path", () => {
-      // Create file with special name
-      sshExec(
-        `echo "special" > /home/${SSH_USER}/project/'file with spaces.txt'`
-      );
-      const result = sshExec(
-        `cat /home/${SSH_USER}/project/'file with spaces.txt'`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("special");
-    });
-  });
+		it("should handle file not found", () => {
+			const result = sshExec(`cat /home/${SSH_USER}/project/nonexistent.txt`);
+			expect(result.code).not.toBe(0);
+			expect(result.stderr).toMatch(/no such file|not found/i);
+		});
 
-  describe("write-equivalent: remote file writing", () => {
-    it("should write content via base64", () => {
-      const content = "Hello, written via base64!";
-      const base64 = Buffer.from(content).toString("base64");
-      const result = sshExec(
-        `echo '${base64}' | base64 -d > /home/${SSH_USER}/project/written.txt && cat /home/${SSH_USER}/project/written.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe(content);
-    });
+		it("should handle special characters in path", () => {
+			// Create file with special name
+			sshExec(`echo "special" > /home/${SSH_USER}/project/'file with spaces.txt'`);
+			const result = sshExec(`cat /home/${SSH_USER}/project/'file with spaces.txt'`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("special");
+		});
+	});
 
-    it("should create parent directories", () => {
-      const content = "nested write test";
-      const base64 = Buffer.from(content).toString("base64");
-      const result = sshExec(
-        `mkdir -p /home/${SSH_USER}/project/new/nested/dir && echo '${base64}' | base64 -d > /home/${SSH_USER}/project/new/nested/dir/file.txt && cat /home/${SSH_USER}/project/new/nested/dir/file.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe(content);
-    });
+	describe("write-equivalent: remote file writing", () => {
+		it("should write content via base64", () => {
+			const content = "Hello, written via base64!";
+			const base64 = Buffer.from(content).toString("base64");
+			const result = sshExec(
+				`echo '${base64}' | base64 -d > /home/${SSH_USER}/project/written.txt && cat /home/${SSH_USER}/project/written.txt`
+			);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe(content);
+		});
 
-    it("should handle special characters in content", () => {
-      const content = "Special chars: $HOME `whoami` && || ; 'quotes' \"double\"";
-      const base64 = Buffer.from(content).toString("base64");
-      const result = sshExec(
-        `printf '%s' '${base64}' | base64 -d > /home/${SSH_USER}/project/special.txt && cat /home/${SSH_USER}/project/special.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe(content);
-    });
+		it("should create parent directories", () => {
+			const content = "nested write test";
+			const base64 = Buffer.from(content).toString("base64");
+			const result = sshExec(
+				`mkdir -p /home/${SSH_USER}/project/new/nested/dir && echo '${base64}' | base64 -d > /home/${SSH_USER}/project/new/nested/dir/file.txt && cat /home/${SSH_USER}/project/new/nested/dir/file.txt`
+			);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe(content);
+		});
 
-    it("should handle binary-like content", () => {
-      // Content with null bytes and control characters
-      const content = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]).toString(
-        "base64"
-      );
-      const result = sshExec(
-        `printf '%s' '${content}' | base64 -d > /home/${SSH_USER}/project/binary.bin && base64 /home/${SSH_USER}/project/binary.bin`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe(content);
-    });
+		it("should handle special characters in content", () => {
+			const content = "Special chars: $HOME `whoami` && || ; 'quotes' \"double\"";
+			const base64 = Buffer.from(content).toString("base64");
+			const result = sshExec(
+				`printf '%s' '${base64}' | base64 -d > /home/${SSH_USER}/project/special.txt && cat /home/${SSH_USER}/project/special.txt`
+			);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe(content);
+		});
 
-    it("should handle large content with chunking", () => {
-      // Generate content larger than typical shell limits
-      const largeContent = "x".repeat(100000);
-      const base64 = Buffer.from(largeContent).toString("base64");
+		it("should handle binary-like content", () => {
+			// Content with null bytes and control characters
+			const content = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]).toString("base64");
+			const result = sshExec(
+				`printf '%s' '${content}' | base64 -d > /home/${SSH_USER}/project/binary.bin && base64 /home/${SSH_USER}/project/binary.bin`
+			);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe(content);
+		});
 
-      // Split into chunks (like the extension does)
-      const chunkSize = 65536;
-      const chunks: string[] = [];
-      for (let i = 0; i < base64.length; i += chunkSize) {
-        chunks.push(base64.slice(i, i + chunkSize));
-      }
+		it("should handle large content with chunking", () => {
+			// Generate content larger than typical shell limits
+			const largeContent = "x".repeat(100000);
+			const base64 = Buffer.from(largeContent).toString("base64");
 
-      // Write first chunk
-      let result = sshExec(
-        `printf '%s' '${chunks[0]}' | base64 -d > /home/${SSH_USER}/project/large.txt`
-      );
-      expect(result.code).toBe(0);
+			// Split into chunks (like the extension does)
+			const chunkSize = 65536;
+			const chunks: string[] = [];
+			for (let i = 0; i < base64.length; i += chunkSize) {
+				chunks.push(base64.slice(i, i + chunkSize));
+			}
 
-      // Append remaining chunks
-      for (let i = 1; i < chunks.length; i++) {
-        result = sshExec(
-          `printf '%s' '${chunks[i]}' | base64 -d >> /home/${SSH_USER}/project/large.txt`
-        );
-        expect(result.code).toBe(0);
-      }
+			// Write first chunk
+			let result = sshExec(`printf '%s' '${chunks[0]}' | base64 -d > /home/${SSH_USER}/project/large.txt`);
+			expect(result.code).toBe(0);
 
-      // Verify size
-      result = sshExec(
-        `wc -c < /home/${SSH_USER}/project/large.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(parseInt(result.stdout.trim())).toBe(largeContent.length);
-    });
-  });
+			// Append remaining chunks
+			for (let i = 1; i < chunks.length; i++) {
+				result = sshExec(`printf '%s' '${chunks[i]}' | base64 -d >> /home/${SSH_USER}/project/large.txt`);
+				expect(result.code).toBe(0);
+			}
 
-  describe("edit-equivalent: remote file editing", () => {
-    beforeEach(() => {
-      // Reset editable file before each test
-      sshExec(
-        `echo "hello world original" > /home/${SSH_USER}/project/editable.txt`
-      );
-    });
+			// Verify size
+			result = sshExec(`wc -c < /home/${SSH_USER}/project/large.txt`);
+			expect(result.code).toBe(0);
+			expect(parseInt(result.stdout.trim())).toBe(largeContent.length);
+		});
+	});
 
-    it("should replace exact text", () => {
-      // Read, replace, write pattern
-      const readResult = sshExec(
-        `cat /home/${SSH_USER}/project/editable.txt`
-      );
-      const content = readResult.stdout;
+	describe("edit-equivalent: remote file editing", () => {
+		beforeEach(() => {
+			// Reset editable file before each test
+			sshExec(`echo "hello world original" > /home/${SSH_USER}/project/editable.txt`);
+		});
 
-      // Check oldText exists exactly once
-      const oldText = "original";
-      const newText = "modified";
-      const occurrences = content.split(oldText).length - 1;
-      expect(occurrences).toBe(1);
+		it("should replace exact text", () => {
+			// Read, replace, write pattern
+			const readResult = sshExec(`cat /home/${SSH_USER}/project/editable.txt`);
+			const content = readResult.stdout;
 
-      // Perform replacement
-      const newContent = content.replace(oldText, newText);
-      const base64 = Buffer.from(newContent).toString("base64");
+			// Check oldText exists exactly once
+			const oldText = "original";
+			const newText = "modified";
+			const occurrences = content.split(oldText).length - 1;
+			expect(occurrences).toBe(1);
 
-      const writeResult = sshExec(
-        `echo '${base64}' | base64 -d > /home/${SSH_USER}/project/editable.txt`
-      );
-      expect(writeResult.code).toBe(0);
+			// Perform replacement
+			const newContent = content.replace(oldText, newText);
+			const base64 = Buffer.from(newContent).toString("base64");
 
-      // Verify
-      const verifyResult = sshExec(
-        `cat /home/${SSH_USER}/project/editable.txt`
-      );
-      expect(verifyResult.stdout).toContain("modified");
-      expect(verifyResult.stdout).not.toContain("original");
-    });
+			const writeResult = sshExec(`echo '${base64}' | base64 -d > /home/${SSH_USER}/project/editable.txt`);
+			expect(writeResult.code).toBe(0);
 
-    it("should fail when oldText not found", () => {
-      const readResult = sshExec(
-        `cat /home/${SSH_USER}/project/editable.txt`
-      );
-      const content = readResult.stdout;
+			// Verify
+			const verifyResult = sshExec(`cat /home/${SSH_USER}/project/editable.txt`);
+			expect(verifyResult.stdout).toContain("modified");
+			expect(verifyResult.stdout).not.toContain("original");
+		});
 
-      const oldText = "nonexistent";
-      const occurrences = content.split(oldText).length - 1;
-      expect(occurrences).toBe(0); // Simulating the check that would fail
-    });
+		it("should fail when oldText not found", () => {
+			const readResult = sshExec(`cat /home/${SSH_USER}/project/editable.txt`);
+			const content = readResult.stdout;
 
-    it("should fail when oldText appears multiple times", () => {
-      // Create file with duplicate text
-      sshExec(
-        `echo "hello hello hello" > /home/${SSH_USER}/project/editable.txt`
-      );
+			const oldText = "nonexistent";
+			const occurrences = content.split(oldText).length - 1;
+			expect(occurrences).toBe(0); // Simulating the check that would fail
+		});
 
-      const readResult = sshExec(
-        `cat /home/${SSH_USER}/project/editable.txt`
-      );
-      const content = readResult.stdout;
+		it("should fail when oldText appears multiple times", () => {
+			// Create file with duplicate text
+			sshExec(`echo "hello hello hello" > /home/${SSH_USER}/project/editable.txt`);
 
-      const oldText = "hello";
-      const occurrences = content.split(oldText).length - 1;
-      expect(occurrences).toBe(3); // Simulating the check that would fail
-    });
-  });
+			const readResult = sshExec(`cat /home/${SSH_USER}/project/editable.txt`);
+			const content = readResult.stdout;
 
-  describe("grep-equivalent: remote content search", () => {
-    it("should find matching lines", () => {
-      const result = sshExec(
-        `grep -r -n 'Hello' /home/${SSH_USER}/project/ 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("test.txt");
-      expect(result.stdout).toContain("Hello");
-    });
+			const oldText = "hello";
+			const occurrences = content.split(oldText).length - 1;
+			expect(occurrences).toBe(3); // Simulating the check that would fail
+		});
+	});
 
-    it("should support case-insensitive search", () => {
-      const result = sshExec(
-        `grep -r -n -i 'HELLO' /home/${SSH_USER}/project/ 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("Hello");
-    });
+	describe("grep-equivalent: remote content search", () => {
+		it("should find matching lines", () => {
+			const result = sshExec(`grep -r -n 'Hello' /home/${SSH_USER}/project/ 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("test.txt");
+			expect(result.stdout).toContain("Hello");
+		});
 
-    it("should support literal pattern search", () => {
-      // Create file with regex-like content
-      sshExec(
-        `echo "test [pattern] here" > /home/${SSH_USER}/project/regex.txt`
-      );
-      const result = sshExec(
-        `grep -r -n -F '[pattern]' /home/${SSH_USER}/project/ 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("[pattern]");
-    });
+		it("should support case-insensitive search", () => {
+			const result = sshExec(`grep -r -n -i 'HELLO' /home/${SSH_USER}/project/ 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("Hello");
+		});
 
-    it("should support context lines", () => {
-      const result = sshExec(
-        `grep -r -n -C2 'line5' /home/${SSH_USER}/project/multiline.txt 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("line3");
-      expect(result.stdout).toContain("line4");
-      expect(result.stdout).toContain("line5");
-      expect(result.stdout).toContain("line6");
-      expect(result.stdout).toContain("line7");
-    });
+		it("should support literal pattern search", () => {
+			// Create file with regex-like content
+			sshExec(`echo "test [pattern] here" > /home/${SSH_USER}/project/regex.txt`);
+			const result = sshExec(`grep -r -n -F '[pattern]' /home/${SSH_USER}/project/ 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("[pattern]");
+		});
 
-    it("should return no matches gracefully", () => {
-      const result = sshExec(
-        `grep -r 'xyznonexistent123' /home/${SSH_USER}/project/ 2>/dev/null`
-      );
-      expect(result.code).toBe(1); // grep returns 1 for no matches
-      expect(result.stdout.trim()).toBe("");
-    });
-  });
+		it("should support context lines", () => {
+			const result = sshExec(`grep -r -n -C2 'line5' /home/${SSH_USER}/project/multiline.txt 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("line3");
+			expect(result.stdout).toContain("line4");
+			expect(result.stdout).toContain("line5");
+			expect(result.stdout).toContain("line6");
+			expect(result.stdout).toContain("line7");
+		});
 
-  describe("find-equivalent: remote file search", () => {
-    it("should find files by pattern", () => {
-      const result = sshExec(
-        `find /home/${SSH_USER}/project -name '*.txt' 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("test.txt");
-      expect(result.stdout).toContain("multiline.txt");
-    });
+		it("should return no matches gracefully", () => {
+			const result = sshExec(`grep -r 'xyznonexistent123' /home/${SSH_USER}/project/ 2>/dev/null`);
+			expect(result.code).toBe(1); // grep returns 1 for no matches
+			expect(result.stdout.trim()).toBe("");
+		});
+	});
 
-    it("should find files by extension", () => {
-      const result = sshExec(
-        `find /home/${SSH_USER}/project -name '*.json' 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("package.json");
-    });
+	describe("find-equivalent: remote file search", () => {
+		it("should find files by pattern", () => {
+			const result = sshExec(`find /home/${SSH_USER}/project -name '*.txt' 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("test.txt");
+			expect(result.stdout).toContain("multiline.txt");
+		});
 
-    it("should find files in subdirectories", () => {
-      const result = sshExec(
-        `find /home/${SSH_USER}/project -name 'nested.txt' 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("subdir/nested.txt");
-    });
+		it("should find files by extension", () => {
+			const result = sshExec(`find /home/${SSH_USER}/project -name '*.json' 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("package.json");
+		});
 
-    it("should respect result limit", () => {
-      const result = sshExec(
-        `find /home/${SSH_USER}/project -name '*.txt' 2>/dev/null | head -n 2`
-      );
-      expect(result.code).toBe(0);
-      const lines = result.stdout.trim().split("\n").filter(Boolean);
-      expect(lines.length).toBeLessThanOrEqual(2);
-    });
+		it("should find files in subdirectories", () => {
+			const result = sshExec(`find /home/${SSH_USER}/project -name 'nested.txt' 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("subdir/nested.txt");
+		});
 
-    it("should handle no matches", () => {
-      const result = sshExec(
-        `find /home/${SSH_USER}/project -name '*.nonexistent' 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("");
-    });
-  });
+		it("should respect result limit", () => {
+			const result = sshExec(`find /home/${SSH_USER}/project -name '*.txt' 2>/dev/null | head -n 2`);
+			expect(result.code).toBe(0);
+			const lines = result.stdout.trim().split("\n").filter(Boolean);
+			expect(lines.length).toBeLessThanOrEqual(2);
+		});
 
-  describe("ls-equivalent: remote directory listing", () => {
-    it("should list directory contents", () => {
-      const result = sshExec(
-        `ls -1a /home/${SSH_USER}/project 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("test.txt");
-      expect(result.stdout).toContain("package.json");
-      expect(result.stdout).toContain("subdir");
-    });
+		it("should handle no matches", () => {
+			const result = sshExec(`find /home/${SSH_USER}/project -name '*.nonexistent' 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("");
+		});
+	});
 
-    it("should list subdirectory contents", () => {
-      const result = sshExec(
-        `ls -1a /home/${SSH_USER}/project/subdir 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("nested.txt");
-    });
+	describe("ls-equivalent: remote directory listing", () => {
+		it("should list directory contents", () => {
+			const result = sshExec(`ls -1a /home/${SSH_USER}/project 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("test.txt");
+			expect(result.stdout).toContain("package.json");
+			expect(result.stdout).toContain("subdir");
+		});
 
-    it("should respect result limit", () => {
-      const result = sshExec(
-        `ls -1a /home/${SSH_USER}/project 2>/dev/null | head -n 3`
-      );
-      expect(result.code).toBe(0);
-      const lines = result.stdout.trim().split("\n").filter(Boolean);
-      expect(lines.length).toBeLessThanOrEqual(3);
-    });
+		it("should list subdirectory contents", () => {
+			const result = sshExec(`ls -1a /home/${SSH_USER}/project/subdir 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("nested.txt");
+		});
 
-    it("should handle non-existent directory", () => {
-      const result = sshExec(
-        `ls /home/${SSH_USER}/project/nonexistent 2>&1`
-      );
-      expect(result.code).not.toBe(0);
-      expect(result.stdout + result.stderr).toMatch(
-        /no such file|not found|cannot access/i
-      );
-    });
+		it("should respect result limit", () => {
+			const result = sshExec(`ls -1a /home/${SSH_USER}/project 2>/dev/null | head -n 3`);
+			expect(result.code).toBe(0);
+			const lines = result.stdout.trim().split("\n").filter(Boolean);
+			expect(lines.length).toBeLessThanOrEqual(3);
+		});
 
-    it("should show hidden files", () => {
-      // Create hidden file
-      sshExec(
-        `echo "hidden" > /home/${SSH_USER}/project/.hidden`
-      );
-      const result = sshExec(
-        `ls -1a /home/${SSH_USER}/project 2>/dev/null`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain(".hidden");
-    });
-  });
+		it("should handle non-existent directory", () => {
+			const result = sshExec(`ls /home/${SSH_USER}/project/nonexistent 2>&1`);
+			expect(result.code).not.toBe(0);
+			expect(result.stdout + result.stderr).toMatch(/no such file|not found|cannot access/i);
+		});
 
-  describe("shell escaping", () => {
-    it("should escape single quotes in paths", () => {
-      const filename = "file's name.txt";
-      const escapedFilename = escapeForShell(filename);
+		it("should show hidden files", () => {
+			// Create hidden file
+			sshExec(`echo "hidden" > /home/${SSH_USER}/project/.hidden`);
+			const result = sshExec(`ls -1a /home/${SSH_USER}/project 2>/dev/null`);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain(".hidden");
+		});
+	});
 
-      // Create file
-      sshExec(
-        `echo "content" > /home/${SSH_USER}/project/${escapedFilename}`
-      );
+	describe("shell escaping", () => {
+		it("should escape single quotes in paths", () => {
+			const filename = "file's name.txt";
+			const escapedFilename = escapeForShell(filename);
 
-      // Read file
-      const result = sshExec(
-        `cat /home/${SSH_USER}/project/${escapedFilename}`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("content");
-    });
+			// Create file
+			sshExec(`echo "content" > /home/${SSH_USER}/project/${escapedFilename}`);
 
-    it("should escape dollar signs", () => {
-      const content = "Price: $100";
-      const base64 = Buffer.from(content).toString("base64");
-      sshExec(
-        `printf '%s' '${base64}' | base64 -d > /home/${SSH_USER}/project/dollar.txt`
-      );
+			// Read file
+			const result = sshExec(`cat /home/${SSH_USER}/project/${escapedFilename}`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("content");
+		});
 
-      const result = sshExec(
-        `cat /home/${SSH_USER}/project/dollar.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe(content);
-    });
+		it("should escape dollar signs", () => {
+			const content = "Price: $100";
+			const base64 = Buffer.from(content).toString("base64");
+			sshExec(`printf '%s' '${base64}' | base64 -d > /home/${SSH_USER}/project/dollar.txt`);
 
-    it("should escape backticks", () => {
-      const content = "Command: `ls`";
-      const base64 = Buffer.from(content).toString("base64");
-      sshExec(
-        `printf '%s' '${base64}' | base64 -d > /home/${SSH_USER}/project/backtick.txt`
-      );
+			const result = sshExec(`cat /home/${SSH_USER}/project/dollar.txt`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe(content);
+		});
 
-      const result = sshExec(
-        `cat /home/${SSH_USER}/project/backtick.txt`
-      );
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe(content);
-    });
-  });
+		it("should escape backticks", () => {
+			const content = "Command: `ls`";
+			const base64 = Buffer.from(content).toString("base64");
+			sshExec(`printf '%s' '${base64}' | base64 -d > /home/${SSH_USER}/project/backtick.txt`);
 
-  describe("remote cwd handling", () => {
-    it("should execute commands relative to cwd", () => {
-      // Simulate remoteCwd by prefixing with cd
-      const remoteCwd = `/home/${SSH_USER}/project`;
-      const result = sshExec(`cd ${escapeForShell(remoteCwd)} && ls test.txt`);
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("test.txt");
-    });
+			const result = sshExec(`cat /home/${SSH_USER}/project/backtick.txt`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe(content);
+		});
+	});
 
-    it("should handle cwd with spaces", () => {
-      // Create directory with spaces
-      sshExec(`mkdir -p '/home/${SSH_USER}/project/dir with spaces'`);
-      sshExec(
-        `echo "spaced" > '/home/${SSH_USER}/project/dir with spaces/file.txt'`
-      );
+	describe("remote cwd handling", () => {
+		it("should execute commands relative to cwd", () => {
+			// Simulate remoteCwd by prefixing with cd
+			const remoteCwd = `/home/${SSH_USER}/project`;
+			const result = sshExec(`cd ${escapeForShell(remoteCwd)} && ls test.txt`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("test.txt");
+		});
 
-      const remoteCwd = `/home/${SSH_USER}/project/dir with spaces`;
-      const result = sshExec(`cd ${escapeForShell(remoteCwd)} && cat file.txt`);
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe("spaced");
-    });
-  });
+		it("should handle cwd with spaces", () => {
+			// Create directory with spaces
+			sshExec(`mkdir -p '/home/${SSH_USER}/project/dir with spaces'`);
+			sshExec(`echo "spaced" > '/home/${SSH_USER}/project/dir with spaces/file.txt'`);
+
+			const remoteCwd = `/home/${SSH_USER}/project/dir with spaces`;
+			const result = sshExec(`cd ${escapeForShell(remoteCwd)} && cat file.txt`);
+			expect(result.code).toBe(0);
+			expect(result.stdout.trim()).toBe("spaced");
+		});
+	});
 });

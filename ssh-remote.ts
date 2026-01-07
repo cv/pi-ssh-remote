@@ -8,12 +8,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import {
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
-	formatSize,
-	truncateTail,
-} from "@mariozechner/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
@@ -128,7 +123,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 	// Helper to build SSH command prefix
 	function sshPrefix(): string[] {
 		if (!sshHost) return [];
-		
+
 		// Use custom command if specified (e.g., "tsh ssh" for Teleport)
 		if (sshCommand) {
 			const parts = sshCommand.split(/\s+/);
@@ -137,7 +132,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			}
 			return [...parts, sshHost];
 		}
-		
+
 		// Default SSH command
 		if (sshPort) {
 			return ["ssh", "-p", String(sshPort), sshHost];
@@ -165,7 +160,8 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		}
 
 		// Detect rg and fd in a single SSH call
-		const detectCmd = "command -v rg >/dev/null 2>&1 && echo 'rg:yes' || echo 'rg:no'; command -v fd >/dev/null 2>&1 && echo 'fd:yes' || echo 'fd:no'";
+		const detectCmd =
+			"command -v rg >/dev/null 2>&1 && echo 'rg:yes' || echo 'rg:no'; command -v fd >/dev/null 2>&1 && echo 'fd:yes' || echo 'fd:no'";
 		const prefix = sshPrefix();
 
 		try {
@@ -654,7 +650,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 				if (occurrences === 0) {
 					return {
-						content: [{ type: "text", text: `Error: oldText not found in file. Make sure it matches exactly (including whitespace).` }],
+						content: [
+							{
+								type: "text",
+								text: `Error: oldText not found in file. Make sure it matches exactly (including whitespace).`,
+							},
+						],
 						details: { path, remote: !!host },
 						isError: true,
 					};
@@ -662,7 +663,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 
 				if (occurrences > 1) {
 					return {
-						content: [{ type: "text", text: `Error: oldText appears ${occurrences} times in file. It must appear exactly once for safe replacement.` }],
+						content: [
+							{
+								type: "text",
+								text: `Error: oldText appears ${occurrences} times in file. It must appear exactly once for safe replacement.`,
+							},
+						],
 						details: { path, occurrences, remote: !!host },
 						isError: true,
 					};
@@ -759,13 +765,24 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			pattern: Type.String({ description: "Search pattern (regex or literal string)" }),
 			path: Type.Optional(Type.String({ description: "Directory or file to search (default: current directory)" })),
 			ignoreCase: Type.Optional(Type.Boolean({ description: "Case-insensitive search (default: false)" })),
-			literal: Type.Optional(Type.Boolean({ description: "Treat pattern as literal string instead of regex (default: false)" })),
-			context: Type.Optional(Type.Number({ description: "Number of lines to show before and after each match (default: 0)" })),
+			literal: Type.Optional(
+				Type.Boolean({ description: "Treat pattern as literal string instead of regex (default: false)" })
+			),
+			context: Type.Optional(
+				Type.Number({ description: "Number of lines to show before and after each match (default: 0)" })
+			),
 			limit: Type.Optional(Type.Number({ description: "Maximum number of matches to return (default: 100)" })),
 		}),
 
 		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
-			const { pattern, path: searchPath, ignoreCase, literal, context, limit } = params as {
+			const {
+				pattern,
+				path: searchPath,
+				ignoreCase,
+				literal,
+				context,
+				limit,
+			} = params as {
 				pattern: string;
 				path?: string;
 				ignoreCase?: boolean;
@@ -870,7 +887,11 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _onUpdate, ctx, signal) {
-			const { pattern, path: searchPath, limit } = params as {
+			const {
+				pattern,
+				path: searchPath,
+				limit,
+			} = params as {
 				pattern: string;
 				path?: string;
 				limit?: number;
@@ -1053,7 +1074,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI) {
 			invalidateToolsCache();
 			persistState();
 			updateStatus(ctx);
-			
+
 			const portInfo = sshPort ? `:${sshPort}` : "";
 			const cwdInfo = remoteCwd ? ` (${remoteCwd})` : "";
 			const cmdInfo = sshCommand ? ` via ${sshCommand}` : "";
