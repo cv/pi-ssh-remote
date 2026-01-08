@@ -9,11 +9,6 @@ import * as os from "os";
 import * as net from "net";
 
 const DOCKER_IMAGE = "pi-sshfs-e2e";
-// SSH credentials for Docker container (used in Dockerfile)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const SSH_USER = "root";
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const SSH_PASSWORD = "root";
 
 let SSH_PORT: number;
 let DOCKER_CONTAINER: string;
