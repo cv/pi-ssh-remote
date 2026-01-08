@@ -10,6 +10,6 @@
 		"outDir": "./dist",
 		"rootDir": "."
 	},
-	"include": ["*.ts", "tests/**/*.ts", "e2e/**/*.ts", "__mocks__/**/*.ts"],
+	"include": ["*.ts", "src/**/*.ts", "tests/**/*.ts", "e2e/**/*.ts", "__mocks__/**/*.ts"],
 	"exclude": ["node_modules", "dist", "coverage"]
 }

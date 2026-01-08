@@ -11,13 +11,14 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { SSHState } from "../types";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { SSHConfig } from "../index";
 
-export function registerBashTool(state: SSHState): void {
-	state.pi.registerTool({
+export function registerBashTool(pi: ExtensionAPI, getConfig: () => SSHConfig): void {
+	pi.registerTool({
 		name: "bash",
 		label: "Bash (SSH)",
-		description: `Execute a bash command. When SSH remote is configured, executes on the remote host. Returns stdout and stderr. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first). Optionally provide a timeout in seconds.`,
+		description: `Execute a bash command. When --ssh-host is configured, executes on the remote host. Returns stdout and stderr. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}.`,
 		parameters: Type.Object({
 			command: Type.String({ description: "Bash command to execute" }),
 			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional)" })),
@@ -25,9 +26,10 @@ export function registerBashTool(state: SSHState): void {
 
 		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const { command, timeout } = params as { command: string; timeout?: number };
+			const config = getConfig();
 
-			if (!state.getHost()) {
-				// Delegate to pi's built-in bash tool
+			if (!config.host) {
+				// No SSH host - delegate to pi's built-in bash tool
 				const localBash = createBashTool(ctx.cwd);
 				const result = await localBash.execute(_toolCallId, { command, timeout }, signal, onUpdate);
 				return {
@@ -36,15 +38,19 @@ export function registerBashTool(state: SSHState): void {
 				};
 			}
 
-			// Execute remotely via SSH
-			const remoteCmd = state.buildRemoteCommand(command);
+			// Build SSH command
+			const sshArgs = buildSSHArgs(config);
+			const remoteCmd = config.cwd ? `cd '${escapePath(config.cwd)}' && ${command}` : command;
 
 			try {
-				const result = await state.sshExec(remoteCmd, { signal, timeout, cwd: ctx.cwd });
+				const effectiveTimeout = timeout ?? config.timeout;
+				const result = await pi.exec(sshArgs[0], [...sshArgs.slice(1), remoteCmd], {
+					signal,
+					timeout: effectiveTimeout ? effectiveTimeout * 1000 : undefined,
+					cwd: ctx.cwd,
+				});
 
 				const output = result.stdout + (result.stderr ? `\n${result.stderr}` : "");
-
-				// Apply truncation
 				const truncation = truncateTail(output, {
 					maxLines: DEFAULT_MAX_LINES,
 					maxBytes: DEFAULT_MAX_BYTES,
@@ -64,14 +70,15 @@ export function registerBashTool(state: SSHState): void {
 					details: {
 						exitCode: result.code,
 						remote: true,
-						host: state.getHost(),
+						host: config.host,
 						truncation: truncation.truncated ? truncation : undefined,
 					},
 				};
 			} catch (err: unknown) {
+				const message = err instanceof Error ? err.message : String(err);
 				return {
-					content: [{ type: "text", text: `Error: ${state.getErrorMessage(err)}` }],
-					details: { error: state.getErrorMessage(err), remote: true },
+					content: [{ type: "text", text: `Error: ${message}` }],
+					details: { error: message, remote: true },
 					isError: true,
 				};
 			}
@@ -79,8 +86,8 @@ export function registerBashTool(state: SSHState): void {
 
 		renderCall(args, theme) {
 			const cmd = (args as { command?: string }).command || "";
-			const host = state.getHost();
-			const prefix = host ? theme.fg("accent", `[${host}] `) : "";
+			const config = getConfig();
+			const prefix = config.host ? theme.fg("accent", `[${config.host}] `) : "";
 			return new Text(prefix + theme.fg("muted", cmd), 0, 0);
 		},
 
@@ -100,7 +107,6 @@ export function registerBashTool(state: SSHState): void {
 			const prefix = details?.remote ? theme.fg("accent", "🔌 ") : "";
 			const exitInfo = details?.exitCode !== 0 ? theme.fg("error", ` [exit: ${details?.exitCode}]`) : "";
 
-			// Show first few lines of output
 			const lines = text.split("\n").slice(0, 10);
 			let display = lines.join("\n");
 			if (text.split("\n").length > 10) {
@@ -110,4 +116,26 @@ export function registerBashTool(state: SSHState): void {
 			return new Text(prefix + display + exitInfo, 0, 0);
 		},
 	});
+}
+
+function buildSSHArgs(config: SSHConfig): string[] {
+	const args: string[] = [];
+
+	if (config.command) {
+		// Custom SSH command (e.g., "ssh -i ~/.ssh/mykey")
+		args.push(...config.command.split(/\s+/));
+	} else {
+		args.push("ssh");
+	}
+
+	if (config.port) {
+		args.push("-p", String(config.port));
+	}
+
+	args.push(config.host!);
+	return args;
+}
+
+function escapePath(path: string): string {
+	return path.replace(/'/g, "'\\''");
 }

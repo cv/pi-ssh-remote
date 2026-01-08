@@ -1,44 +1,12 @@
 /**
- * Jest setup file - configures mocks for all test files
- * This file runs before any tests but after the test framework is initialized
+ * Jest setup - configures mocks for tests
  */
 
-// Define mock functions first, before any imports
 const mockBashExecute = jest.fn();
-const mockReadExecute = jest.fn();
-const mockWriteExecute = jest.fn();
-const mockEditExecute = jest.fn();
-const mockGrepExecute = jest.fn();
-const mockFindExecute = jest.fn();
-const mockLsExecute = jest.fn();
-
 const mockCreateBashTool = jest.fn(() => ({ execute: mockBashExecute }));
-const mockCreateReadTool = jest.fn(() => ({ execute: mockReadExecute }));
-const mockCreateWriteTool = jest.fn(() => ({ execute: mockWriteExecute }));
-const mockCreateEditTool = jest.fn(() => ({ execute: mockEditExecute }));
-const mockCreateGrepTool = jest.fn(() => ({ execute: mockGrepExecute }));
-const mockCreateFindTool = jest.fn(() => ({ execute: mockFindExecute }));
-const mockCreateLsTool = jest.fn(() => ({ execute: mockLsExecute }));
 
-// Export mocks for use in tests
-export {
-	mockBashExecute,
-	mockReadExecute,
-	mockWriteExecute,
-	mockEditExecute,
-	mockGrepExecute,
-	mockFindExecute,
-	mockLsExecute,
-	mockCreateBashTool,
-	mockCreateReadTool,
-	mockCreateWriteTool,
-	mockCreateEditTool,
-	mockCreateGrepTool,
-	mockCreateFindTool,
-	mockCreateLsTool,
-};
+export { mockBashExecute, mockCreateBashTool };
 
-// Mock the @mariozechner/pi-coding-agent module
 jest.mock("@mariozechner/pi-coding-agent", () => ({
 	DEFAULT_MAX_BYTES: 50000,
 	DEFAULT_MAX_LINES: 2000,
@@ -60,10 +28,4 @@ jest.mock("@mariozechner/pi-coding-agent", () => ({
 		};
 	}),
 	createBashTool: mockCreateBashTool,
-	createReadTool: mockCreateReadTool,
-	createWriteTool: mockCreateWriteTool,
-	createEditTool: mockCreateEditTool,
-	createGrepTool: mockCreateGrepTool,
-	createFindTool: mockCreateFindTool,
-	createLsTool: mockCreateLsTool,
 }));

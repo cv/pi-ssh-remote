@@ -1,0 +1,119 @@
+#!/bin/bash
+#
+# pi-ssh - Launch pi with SSH remote support
+#
+# Usage: pi-ssh user@host:/path [options]
+#
+# This script:
+#   1. Mounts the remote path via SSHFS
+#   2. Launches pi from the mount point
+#   3. Unmounts on exit
+#
+
+set -e
+
+# Parse arguments
+if [ -z "$1" ]; then
+    echo "Usage: pi-ssh user@host:/path [pi options]"
+    echo ""
+    echo "Examples:"
+    echo "  pi-ssh me@server:/home/me/project"
+    echo "  pi-ssh me@server:/home/me/project --ssh-port 2222"
+    echo "  pi-ssh me@server:/home/me/project --ssh-command 'ssh -i ~/.ssh/mykey'"
+    exit 1
+fi
+
+# Parse host:/path
+REMOTE="$1"
+shift
+
+if [[ ! "$REMOTE" =~ : ]]; then
+    echo "Error: Must specify remote path as user@host:/path"
+    exit 1
+fi
+
+HOST="${REMOTE%%:*}"
+REMOTE_PATH="${REMOTE#*:}"
+
+# Generate mount point
+HASH=$(echo -n "$REMOTE" | md5sum 2>/dev/null | cut -c1-8 || echo -n "$REMOTE" | md5 | cut -c1-8)
+MOUNT_POINT="${TMPDIR:-/tmp}/pi-ssh-$HASH"
+
+# Parse additional flags for SSH
+SSH_PORT=""
+SSH_COMMAND=""
+PI_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ssh-port)
+            SSH_PORT="$2"
+            PI_ARGS+=("--ssh-port" "$2")
+            shift 2
+            ;;
+        --ssh-command)
+            SSH_COMMAND="$2"
+            PI_ARGS+=("--ssh-command" "$2")
+            shift 2
+            ;;
+        *)
+            PI_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Check for sshfs
+if ! command -v sshfs &> /dev/null; then
+    echo "Error: sshfs is not installed"
+    echo "  macOS: brew install macfuse && brew install gromgit/fuse/sshfs-mac"
+    echo "  Linux: apt install sshfs"
+    exit 1
+fi
+
+# Create mount point
+mkdir -p "$MOUNT_POINT"
+
+# Build sshfs command
+SSHFS_ARGS=("$REMOTE" "$MOUNT_POINT")
+SSHFS_ARGS+=("-o" "StrictHostKeyChecking=accept-new")
+SSHFS_ARGS+=("-o" "reconnect")
+SSHFS_ARGS+=("-o" "ServerAliveInterval=15")
+
+if [ -n "$SSH_PORT" ]; then
+    SSHFS_ARGS+=("-p" "$SSH_PORT")
+fi
+
+if [ -n "$SSH_COMMAND" ]; then
+    SSHFS_ARGS+=("-o" "ssh_command=$SSH_COMMAND")
+fi
+
+# Mount
+echo "Mounting $REMOTE..."
+sshfs "${SSHFS_ARGS[@]}"
+
+# Cleanup function
+cleanup() {
+    echo ""
+    echo "Unmounting..."
+    cd /
+    fusermount -u "$MOUNT_POINT" 2>/dev/null || \
+        umount "$MOUNT_POINT" 2>/dev/null || \
+        diskutil unmount force "$MOUNT_POINT" 2>/dev/null || true
+    rmdir "$MOUNT_POINT" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+# Find extension path (same directory as this script)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "Connected to $HOST:$REMOTE_PATH"
+echo ""
+
+# Launch pi (not exec, so trap can run)
+cd "$MOUNT_POINT"
+pi -e "$SCRIPT_DIR" \
+    --tools 'read,edit,write,grep,find,ls' \
+    --ssh-host "$HOST" \
+    --ssh-cwd "$REMOTE_PATH" \
+    "${PI_ARGS[@]}"
