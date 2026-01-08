@@ -1,9 +1,16 @@
 /**
- * End-to-End Tests for pi-ssh-remote extension tools
+ * End-to-End Tests for SSH primitives
  *
- * These tests verify that SSH tool operations work correctly against a real
- * Docker container with SSH access. They test the tool implementations directly
- * without LLM involvement.
+ * These tests verify that the underlying SSH operations work correctly against
+ * a real Docker container. They test the raw SSH commands (cat, sed, base64,
+ * grep, find, ls) that the extension tools use internally.
+ *
+ * These tests do NOT involve pi or the extension - they're useful for:
+ * - Debugging SSH connectivity issues
+ * - Testing edge cases (shell escaping, large files, binary content)
+ * - Fast iteration without LLM latency
+ *
+ * For full extension integration tests, see extension-integration.e2e.test.ts
  *
  * Prerequisites:
  * - Docker (for SSH server container)
@@ -251,7 +258,7 @@ function setupSSHKeys(): SSHConfig {
 	};
 }
 
-describe("SSH Tools E2E Tests", () => {
+describe("SSH Primitives E2E Tests", () => {
 	beforeAll(async () => {
 		// Check prerequisites
 		try {
