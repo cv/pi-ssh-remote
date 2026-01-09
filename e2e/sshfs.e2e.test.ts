@@ -116,7 +116,7 @@ CMD ["/usr/sbin/sshd", "-D"]
 	}, 120000);
 
 	afterAll(() => {
-		// Cleanup
+		// Cleanup mount point
 		if (mountPoint && fs.existsSync(mountPoint)) {
 			try {
 				execSync(`umount ${mountPoint}`, { stdio: "pipe" });
@@ -128,6 +128,29 @@ CMD ["/usr/sbin/sshd", "-D"]
 				}
 			}
 		}
+
+		// Clean up any pi auto-mounts that may have been created
+		try {
+			const mounts = execSync("mount | grep 'pi-sshfs' || true", { encoding: "utf-8" });
+			mounts
+				.split("\n")
+				.filter((line) => line.includes("pi-sshfs"))
+				.forEach((line) => {
+					const match = line.match(/on ([^\s]+)/);
+					if (match) {
+						try {
+							execSync(`diskutil unmount force "${match[1]}" 2>/dev/null || umount "${match[1]}" 2>/dev/null || true`, {
+								stdio: "pipe",
+							});
+						} catch {
+							/* ignore */
+						}
+					}
+				});
+		} catch {
+			/* ignore */
+		}
+
 		try {
 			execSync(`docker rm -f ${DOCKER_CONTAINER}`, { stdio: "pipe" });
 		} catch {
