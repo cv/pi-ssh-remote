@@ -11,6 +11,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { parse as parseShellQuote } from "shell-quote";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { SSHConfig } from "../index";
 
@@ -122,8 +123,18 @@ function buildSSHArgs(config: SSHConfig): string[] {
 	const args: string[] = [];
 
 	if (config.command) {
-		// Custom SSH command (e.g., "ssh -i ~/.ssh/mykey")
-		args.push(...config.command.split(/\s+/));
+		// Custom SSH command (e.g., "ssh -i ~/.ssh/mykey" or 'ssh -o "ProxyCommand ssh -W %h:%p bastion"')
+		// Use shell-quote for proper parsing of quoted strings
+		const parsed = parseShellQuote(config.command);
+		for (const part of parsed) {
+			if (typeof part === "string") {
+				args.push(part);
+			} else {
+				// shell-quote returns objects for special operators like |, >, etc.
+				// These are invalid in SSH commands, so throw an error
+				throw new Error(`Invalid --ssh-command: shell operators are not allowed. Got: ${JSON.stringify(part)}`);
+			}
+		}
 	} else {
 		args.push("ssh");
 	}
@@ -136,6 +147,22 @@ function buildSSHArgs(config: SSHConfig): string[] {
 	return args;
 }
 
-function escapePath(path: string): string {
-	return path.replace(/'/g, "'\\''");
+/**
+ * Escape a path for safe use in single-quoted shell strings.
+ * Handles edge cases like newlines and other special characters.
+ */
+function escapePath(pathStr: string): string {
+	// Reject paths with null bytes - these are never valid and could cause issues
+	if (pathStr.includes("\0")) {
+		throw new Error("Path contains null byte, which is not allowed");
+	}
+
+	// Reject paths with newlines - these could break command structure
+	if (pathStr.includes("\n") || pathStr.includes("\r")) {
+		throw new Error("Path contains newline characters, which are not supported");
+	}
+
+	// Escape single quotes for use within single-quoted strings
+	// 'path' -> 'path'\''s' (close quote, escaped quote, open quote)
+	return pathStr.replace(/'/g, "'\\''");
 }

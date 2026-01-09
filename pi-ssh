@@ -116,4 +116,5 @@ pi -e "$SCRIPT_DIR" \
     --tools 'read,edit,write,grep,find,ls' \
     --ssh-host "$HOST" \
     --ssh-cwd "$REMOTE_PATH" \
+    --ssh-no-mount \
     "${PI_ARGS[@]}"
