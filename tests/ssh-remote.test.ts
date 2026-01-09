@@ -299,6 +299,60 @@ describe("pi-ssh-remote extension", () => {
 		});
 	});
 
+	describe("session_start - print mode warning", () => {
+		let originalArgv: string[];
+
+		beforeEach(() => {
+			originalArgv = process.argv;
+		});
+
+		afterEach(() => {
+			process.argv = originalArgv;
+		});
+
+		it("should warn when -p flag is detected", async () => {
+			process.argv = ["node", "pi", "-p", "test"];
+
+			const api = createMockExtensionAPI();
+			const execMock = jest
+				.fn()
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // which sshfs
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }); // sshfs mount
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-cwd", "/home/user");
+
+			const ctx = createMockContext();
+			const handler = api._eventHandlers.get("session_start")![0];
+			await handler({}, ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Print mode detected"), "warning");
+		});
+
+		it("should warn when --print flag is detected", async () => {
+			process.argv = ["node", "pi", "--print", "test"];
+
+			const api = createMockExtensionAPI();
+			const execMock = jest
+				.fn()
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // which sshfs
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }); // sshfs mount
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-cwd", "/home/user");
+
+			const ctx = createMockContext();
+			const handler = api._eventHandlers.get("session_start")![0];
+			await handler({}, ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Print mode detected"), "warning");
+		});
+	});
+
 	describe("session_shutdown - unmount", () => {
 		it("should do nothing when no mount was created", async () => {
 			const api = createMockExtensionAPI();
@@ -309,6 +363,95 @@ describe("pi-ssh-remote extension", () => {
 			await handler({}, ctx);
 
 			expect(ctx.ui.notify).not.toHaveBeenCalled();
+		});
+
+		it("should attempt unmount when mount exists", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest
+				.fn()
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // which sshfs
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // sshfs mount
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }); // unmount
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-cwd", "/home/user");
+
+			const ctx = createMockContext();
+
+			// Trigger mount
+			const startHandler = api._eventHandlers.get("session_start")![0];
+			await startHandler({}, ctx);
+
+			// Clear notifications from mount
+			ctx.ui.notify.mockClear();
+
+			// Trigger unmount
+			const shutdownHandler = api._eventHandlers.get("session_shutdown")![0];
+			await shutdownHandler({}, ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Unmounting"), "info");
+			expect(ctx.ui.notify).toHaveBeenCalledWith("Unmounted", "info");
+		});
+
+		it("should use platform-appropriate unmount command", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest
+				.fn()
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // which sshfs
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // sshfs mount
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }); // unmount
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-cwd", "/home/user");
+
+			const ctx = createMockContext();
+
+			// Trigger mount
+			const startHandler = api._eventHandlers.get("session_start")![0];
+			await startHandler({}, ctx);
+
+			// Trigger unmount
+			const shutdownHandler = api._eventHandlers.get("session_shutdown")![0];
+			await shutdownHandler({}, ctx);
+
+			// Should have called platform-appropriate unmount
+			const expectedCmd = process.platform === "darwin" ? "diskutil" : "fusermount";
+			expect(execMock).toHaveBeenCalledWith(expectedCmd, expect.any(Array), expect.any(Object));
+		});
+
+		it("should handle unmount failure gracefully", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest
+				.fn()
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // which sshfs
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // sshfs mount
+				.mockRejectedValueOnce(new Error("Device busy")) // unmount fails
+				.mockRejectedValueOnce(new Error("Device busy")); // fallback also fails
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-cwd", "/home/user");
+
+			const ctx = createMockContext();
+
+			// Trigger mount
+			const startHandler = api._eventHandlers.get("session_start")![0];
+			await startHandler({}, ctx);
+
+			// Clear notifications from mount
+			ctx.ui.notify.mockClear();
+
+			// Trigger unmount
+			const shutdownHandler = api._eventHandlers.get("session_shutdown")![0];
+			await shutdownHandler({}, ctx);
+
+			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Unmount failed"), "warning");
+			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("manually unmount"), "warning");
 		});
 	});
 

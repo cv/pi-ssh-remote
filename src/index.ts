@@ -15,7 +15,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { registerBashTool } from "./tools/bash";
-import { parse as parseShellQuote } from "shell-quote";
+import { buildSSHArgs, extractSSHOptions } from "./utils/ssh";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -118,6 +118,14 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
+		// Detect print mode (-p flag) - in print mode, pi captures cwd before session_start
+		// so auto-mount won't work correctly for file tools
+		const isPrintMode = process.argv.includes("-p") || process.argv.includes("--print");
+		if (isPrintMode) {
+			ctx.ui.notify(`⚠️  Print mode detected. Auto-mount may not work correctly for file tools.`, "warning");
+			ctx.ui.notify(`Use --ssh-no-mount with pre-mounted SSHFS, or use bash commands for file access.`, "info");
+		}
+
 		// Check if SSHFS is available
 		try {
 			await pi.exec("which", ["sshfs"], { timeout: 5000 });
@@ -147,7 +155,7 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 		ctx.ui.notify(`Mounting ${config.host}:${remotePath}...`, "info");
 
 		try {
-			const result = await pi.exec("sshfs", sshfsArgs, { timeout: 30000 });
+			const result = await pi.exec("sshfs", sshfsArgs, { timeout: SSHFS_MOUNT_TIMEOUT });
 			if (result.code !== 0) {
 				throw new Error(result.stderr || "SSHFS mount failed");
 			}
@@ -155,7 +163,21 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 			// Update pi's working directory to the mount point
 			// Note: ctx.cwd is read-only, but we can change process.cwd
 			// The bash tool will use the mount for local file operations
-			process.chdir(mountPoint);
+			try {
+				process.chdir(mountPoint);
+			} catch (chdirErr) {
+				// chdir failed after successful mount - cleanup and rethrow
+				const chdirMessage = chdirErr instanceof Error ? chdirErr.message : String(chdirErr);
+				ctx.ui.notify(`Failed to change to mount directory: ${chdirMessage}`, "error");
+				await unmountSSHFS(pi, mountPoint).catch(() => {});
+				try {
+					fs.rmdirSync(mountPoint);
+				} catch {
+					/* ignore */
+				}
+				mountPoint = null;
+				throw chdirErr;
+			}
 
 			ctx.ui.notify(`Mounted at ${mountPoint}`, "info");
 			ctx.ui.notify(`SSH remote: ${config.host}:${remotePath}`, "info");
@@ -189,23 +211,12 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 		ctx.ui.notify(`Unmounting ${currentMountPoint}...`, "info");
 
 		try {
-			// Try platform-appropriate unmount
-			const unmountCmd = process.platform === "darwin" ? "diskutil" : "fusermount";
-			const unmountArgs =
-				process.platform === "darwin" ? ["unmount", "force", currentMountPoint] : ["-u", currentMountPoint];
-
-			await pi.exec(unmountCmd, unmountArgs, { timeout: 10000 });
+			await unmountSSHFS(pi, currentMountPoint);
 			ctx.ui.notify(`Unmounted`, "info");
 		} catch (err) {
-			// Fallback to umount
-			try {
-				await pi.exec("umount", [currentMountPoint], { timeout: 10000 });
-				ctx.ui.notify(`Unmounted`, "info");
-			} catch {
-				const message = err instanceof Error ? err.message : String(err);
-				ctx.ui.notify(`Unmount failed: ${message}`, "warning");
-				ctx.ui.notify(`You may need to manually unmount: umount ${currentMountPoint}`, "warning");
-			}
+			const message = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Unmount failed: ${message}`, "warning");
+			ctx.ui.notify(`You may need to manually unmount: umount ${currentMountPoint}`, "warning");
 		}
 
 		// Cleanup mount directory
@@ -245,35 +256,8 @@ async function getRemoteHomePath(pi: ExtensionAPI, config: SSHConfig, ctx: Exten
 	return null;
 }
 
-/**
- * Build SSH command arguments
- */
-function buildSSHArgs(config: SSHConfig): string[] {
-	const args: string[] = [];
-
-	if (config.command) {
-		// Use shell-quote for proper parsing of quoted strings
-		const parsed = parseShellQuote(config.command);
-		for (const part of parsed) {
-			if (typeof part === "string") {
-				args.push(part);
-			} else {
-				// shell-quote returns objects for special operators like |, >, etc.
-				// These are invalid in SSH commands, so throw an error
-				throw new Error(`Invalid --ssh-command: shell operators are not allowed. Got: ${JSON.stringify(part)}`);
-			}
-		}
-	} else {
-		args.push("ssh");
-	}
-
-	if (config.port) {
-		args.push("-p", String(config.port));
-	}
-
-	args.push(config.host!);
-	return args;
-}
+/** Timeout for SSHFS mount operation in milliseconds */
+const SSHFS_MOUNT_TIMEOUT = 30000;
 
 /**
  * Build SSHFS mount arguments
@@ -315,21 +299,17 @@ function buildSSHFSArgs(config: SSHConfig, remotePath: string, localPath: string
 }
 
 /**
- * Extract SSH options from a custom SSH command and convert to SSHFS format
+ * Unmount SSHFS mount point
  */
-function extractSSHOptions(command: string): string[] {
-	const opts: string[] = [];
-	const parts = command.split(/\s+/);
+async function unmountSSHFS(pi: ExtensionAPI, mountPath: string): Promise<void> {
+	// Try platform-appropriate unmount
+	const unmountCmd = process.platform === "darwin" ? "diskutil" : "fusermount";
+	const unmountArgs = process.platform === "darwin" ? ["unmount", "force", mountPath] : ["-u", mountPath];
 
-	for (let i = 0; i < parts.length; i++) {
-		if (parts[i] === "-i" && parts[i + 1]) {
-			opts.push(`IdentityFile=${parts[i + 1]}`);
-			i++;
-		} else if (parts[i] === "-o" && parts[i + 1]) {
-			opts.push(parts[i + 1]);
-			i++;
-		}
+	try {
+		await pi.exec(unmountCmd, unmountArgs, { timeout: 10000 });
+	} catch {
+		// Fallback to umount
+		await pi.exec("umount", [mountPath], { timeout: 10000 });
 	}
-
-	return opts;
 }

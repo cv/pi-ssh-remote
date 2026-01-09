@@ -97,9 +97,13 @@ cleanup() {
     echo ""
     echo "Unmounting..."
     cd /
-    fusermount -u "$MOUNT_POINT" 2>/dev/null || \
-        umount "$MOUNT_POINT" 2>/dev/null || \
-        diskutil unmount force "$MOUNT_POINT" 2>/dev/null || true
+    if [[ "$(uname)" == "Darwin" ]]; then
+        diskutil unmount force "$MOUNT_POINT" 2>/dev/null || \
+            umount "$MOUNT_POINT" 2>/dev/null || true
+    else
+        fusermount -u "$MOUNT_POINT" 2>/dev/null || \
+            umount "$MOUNT_POINT" 2>/dev/null || true
+    fi
     rmdir "$MOUNT_POINT" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
