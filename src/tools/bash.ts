@@ -30,7 +30,6 @@ export function registerBashTool(pi: ExtensionAPI, getConfig: () => SSHConfig): 
 			const config = getConfig();
 
 			if (!config.host) {
-				// No SSH host - delegate to pi's built-in bash tool
 				const localBash = createBashTool(ctx.cwd);
 				const result = await localBash.execute(_toolCallId, { command, timeout }, signal, onUpdate);
 				return {
@@ -39,7 +38,6 @@ export function registerBashTool(pi: ExtensionAPI, getConfig: () => SSHConfig): 
 				};
 			}
 
-			// Build SSH command
 			const sshArgs = buildSSHArgs(config);
 			const remoteCmd = config.cwd ? `cd '${escapePath(config.cwd)}' && ${command}` : command;
 

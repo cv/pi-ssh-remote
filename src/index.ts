@@ -42,7 +42,6 @@ function parsePositiveInt(value: string | undefined, name: string, options?: { m
 	return num;
 }
 
-// Track mount state for cleanup
 let mountPoint: string | null = null;
 let originalCwd: string | null = null;
 
@@ -55,7 +54,6 @@ export function _resetMountState(): void {
 }
 
 export default function sshRemoteExtension(pi: ExtensionAPI): void {
-	// Register CLI flags
 	pi.registerFlag("ssh-host", {
 		description: "SSH host for remote bash execution (e.g., user@server)",
 		type: "string",
@@ -91,7 +89,6 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 		type: "boolean",
 	});
 
-	// Build config from flags with validation
 	const getConfig = (): SSHConfig => ({
 		host: (pi.getFlag("ssh-host") as string) || null,
 		port: parsePositiveInt(pi.getFlag("ssh-port") as string, "SSH port", { max: 65535 }),
@@ -101,15 +98,13 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 		strictHostKey: (pi.getFlag("ssh-strict-host-key") as boolean) || false,
 	});
 
-	// Register the SSH-wrapped bash tool
 	registerBashTool(pi, getConfig);
 
-	// Auto-mount SSHFS on session start
 	pi.on("session_start", async (_event, ctx) => {
 		const config = getConfig();
 
 		if (!config.host) {
-			return; // Local mode
+			return;
 		}
 
 		const noMount = pi.getFlag("ssh-no-mount") as boolean;
@@ -126,7 +121,6 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Use --ssh-no-mount with pre-mounted SSHFS, or use bash commands for file access.`, "info");
 		}
 
-		// Check if SSHFS is available
 		try {
 			await pi.exec("which", ["sshfs"], { timeout: 5000 });
 		} catch {
@@ -136,20 +130,17 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		// Determine remote path to mount
 		const remotePath = config.cwd || (await getRemoteHomePath(pi, config, ctx));
 		if (!remotePath) {
 			ctx.ui.notify(`Could not determine remote path to mount`, "error");
 			return;
 		}
 
-		// Create temp mount point
 		const tempBase = path.join(os.tmpdir(), "pi-sshfs");
 		fs.mkdirSync(tempBase, { recursive: true });
 		mountPoint = fs.mkdtempSync(path.join(tempBase, "mount-"));
 		originalCwd = ctx.cwd;
 
-		// Build SSHFS command
 		const sshfsArgs = buildSSHFSArgs(config, remotePath, mountPoint);
 
 		ctx.ui.notify(`Mounting ${config.host}:${remotePath}...`, "info");
@@ -160,20 +151,16 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 				throw new Error(result.stderr || "SSHFS mount failed");
 			}
 
-			// Update pi's working directory to the mount point
-			// Note: ctx.cwd is read-only, but we can change process.cwd
-			// The bash tool will use the mount for local file operations
 			try {
 				process.chdir(mountPoint);
 			} catch (chdirErr) {
-				// chdir failed after successful mount - cleanup and rethrow
 				const chdirMessage = chdirErr instanceof Error ? chdirErr.message : String(chdirErr);
 				ctx.ui.notify(`Failed to change to mount directory: ${chdirMessage}`, "error");
 				await unmountSSHFS(pi, mountPoint).catch(() => {});
 				try {
 					fs.rmdirSync(mountPoint);
 				} catch {
-					/* ignore */
+					// Cleanup is best-effort
 				}
 				mountPoint = null;
 				throw chdirErr;
@@ -187,20 +174,16 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Continuing with bash-only remote access`, "warning");
 			ctx.ui.notify(`⚠️  File tools (read/write/edit) will operate on LOCAL files, not remote!`, "warning");
 
-			// Cleanup failed mount attempt
 			try {
 				fs.rmdirSync(mountPoint);
 			} catch {
-				/* ignore */
+				// Cleanup is best-effort
 			}
 			mountPoint = null;
 		}
 	});
 
-	// Auto-unmount on session shutdown
 	pi.on("session_shutdown", async (_event, ctx) => {
-		// Capture and clear state atomically to prevent race conditions
-		// (e.g., if session_shutdown is triggered multiple times rapidly)
 		const currentMountPoint = mountPoint;
 		const currentOriginalCwd = originalCwd;
 		mountPoint = null;
@@ -219,19 +202,17 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify(`You may need to manually unmount: umount ${currentMountPoint}`, "warning");
 		}
 
-		// Cleanup mount directory
 		try {
 			fs.rmdirSync(currentMountPoint);
 		} catch {
-			/* ignore */
+			// Cleanup is best-effort
 		}
 
-		// Restore original cwd
 		if (currentOriginalCwd) {
 			try {
 				process.chdir(currentOriginalCwd);
 			} catch {
-				/* ignore */
+				// Restoration is best-effort
 			}
 		}
 	});
@@ -265,28 +246,20 @@ const SSHFS_MOUNT_TIMEOUT = 30000;
 function buildSSHFSArgs(config: SSHConfig, remotePath: string, localPath: string): string[] {
 	const args: string[] = [];
 
-	// Remote spec: user@host:/path
 	args.push(`${config.host}:${remotePath}`);
-
-	// Local mount point
 	args.push(localPath);
 
-	// Port option for SSHFS
 	if (config.port) {
 		args.push("-p", String(config.port));
 	}
 
-	// SSH command options (for custom keys, etc.)
 	if (config.command) {
-		// Extract SSH options from custom command
-		// e.g., "ssh -i ~/.ssh/mykey" -> "-o IdentityFile=~/.ssh/mykey"
 		const sshOpts = extractSSHOptions(config.command);
 		for (const opt of sshOpts) {
 			args.push("-o", opt);
 		}
 	}
 
-	// Common SSHFS options
 	if (config.strictHostKey) {
 		args.push("-o", "StrictHostKeyChecking=yes");
 	} else {
@@ -302,14 +275,12 @@ function buildSSHFSArgs(config: SSHConfig, remotePath: string, localPath: string
  * Unmount SSHFS mount point
  */
 async function unmountSSHFS(pi: ExtensionAPI, mountPath: string): Promise<void> {
-	// Try platform-appropriate unmount
 	const unmountCmd = process.platform === "darwin" ? "diskutil" : "fusermount";
 	const unmountArgs = process.platform === "darwin" ? ["unmount", "force", mountPath] : ["-u", mountPath];
 
 	try {
 		await pi.exec(unmountCmd, unmountArgs, { timeout: 10000 });
 	} catch {
-		// Fallback to umount
 		await pi.exec("umount", [mountPath], { timeout: 10000 });
 	}
 }

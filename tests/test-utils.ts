@@ -2,11 +2,11 @@
  * Shared test utilities
  */
 
-export { mockBashExecute, mockCreateBashTool } from "./setup";
-
 import { mockBashExecute, mockCreateBashTool } from "./setup";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { _resetMountState } = require("../src/index");
+
+export { mockBashExecute, mockCreateBashTool };
 
 export function resetAllMocks() {
 	mockBashExecute.mockReset();
