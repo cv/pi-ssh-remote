@@ -90,6 +90,7 @@ umount ~/mnt
 | `--ssh-command` | Custom SSH command (e.g., `ssh -i ~/.ssh/mykey`) |
 | `--ssh-timeout` | Timeout for SSH commands in seconds |
 | `--ssh-no-mount` | Disable auto-mounting (use existing mount or bash-only) |
+| `--ssh-strict-host-key` | Require known host keys (reject unknown hosts) |
 
 ## Prerequisites
 

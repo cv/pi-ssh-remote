@@ -56,6 +56,8 @@ pi-ssh-remote uses two mechanisms:
 
 ⚠️ **SSHFS Mount**: The remote filesystem is mounted locally. Any process on your machine can access it while mounted.
 
+⚠️ **Host Key Verification (TOFU)**: By default, pi-ssh-remote uses `StrictHostKeyChecking=accept-new`, which automatically accepts and remembers host keys on first connection (Trust On First Use). This is convenient but vulnerable to man-in-the-middle attacks on the first connection to a new host. For security-sensitive environments, use `--ssh-strict-host-key` to require hosts to be in your `known_hosts` file.
+
 ---
 
 ## Best Practices
@@ -64,3 +66,5 @@ pi-ssh-remote uses two mechanisms:
 2. **Limit remote user permissions** to only what's needed
 3. **Review commands** before execution on production systems
 4. **Unmount when done** (the `pi-ssh` wrapper does this automatically)
+5. **Use `--ssh-strict-host-key`** in production/sensitive environments to prevent MITM attacks
+6. **Pre-verify host keys** by connecting manually before using pi-ssh-remote with strict mode

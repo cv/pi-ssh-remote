@@ -27,6 +27,7 @@ describe("pi-ssh-remote extension", () => {
 			expect(api.registerFlag).toHaveBeenCalledWith("ssh-command", expect.any(Object));
 			expect(api.registerFlag).toHaveBeenCalledWith("ssh-timeout", expect.any(Object));
 			expect(api.registerFlag).toHaveBeenCalledWith("ssh-no-mount", expect.any(Object));
+			expect(api.registerFlag).toHaveBeenCalledWith("ssh-strict-host-key", expect.any(Object));
 		});
 
 		it("should register bash tool", () => {
@@ -42,6 +43,43 @@ describe("pi-ssh-remote extension", () => {
 
 			expect(api.on).toHaveBeenCalledWith("session_start", expect.any(Function));
 			expect(api.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
+		});
+	});
+
+	describe("input validation", () => {
+		it.each([
+			["invalid", "Invalid SSH port: invalid"],
+			["99999", "Invalid SSH port: 99999"],
+			["0", "Invalid SSH port: 0"],
+			["-1", "Invalid SSH port: -1"],
+		])("should reject invalid port %s", async (port, expectedError) => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-port", port);
+
+			const ctx = createMockContext();
+			const handler = api._eventHandlers.get("session_start")![0];
+
+			await expect(handler({}, ctx)).rejects.toThrow(expectedError);
+		});
+
+		it.each([
+			["notanumber", "Invalid SSH timeout: notanumber"],
+			["0", "Invalid SSH timeout: 0"],
+			["-5", "Invalid SSH timeout: -5"],
+		])("should reject invalid timeout %s", async (timeout, expectedError) => {
+			const api = createMockExtensionAPI();
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-timeout", timeout);
+
+			const ctx = createMockContext();
+			const handler = api._eventHandlers.get("session_start")![0];
+
+			await expect(handler({}, ctx)).rejects.toThrow(expectedError);
 		});
 	});
 
@@ -180,6 +218,57 @@ describe("pi-ssh-remote extension", () => {
 				expect.arrayContaining(["-o", "IdentityFile=~/.ssh/mykey", "-o", "ProxyJump=bastion"]),
 				expect.any(Object)
 			);
+		});
+
+		it("should use StrictHostKeyChecking=accept-new by default", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest
+				.fn()
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // which sshfs
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }); // sshfs mount
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-cwd", "/home/user");
+
+			const ctx = createMockContext();
+			const handler = api._eventHandlers.get("session_start")![0];
+			await handler({}, ctx);
+
+			expect(execMock).toHaveBeenCalledWith(
+				"sshfs",
+				expect.arrayContaining(["-o", "StrictHostKeyChecking=accept-new"]),
+				expect.any(Object)
+			);
+		});
+
+		it("should use StrictHostKeyChecking=yes when --ssh-strict-host-key is set", async () => {
+			const api = createMockExtensionAPI();
+			const execMock = jest
+				.fn()
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }) // which sshfs
+				.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }); // sshfs mount
+			api._setExecMock(execMock);
+			extensionFn(api);
+
+			api._setFlag("ssh-host", "user@server");
+			api._setFlag("ssh-cwd", "/home/user");
+			api._setFlag("ssh-strict-host-key", true);
+
+			const ctx = createMockContext();
+			const handler = api._eventHandlers.get("session_start")![0];
+			await handler({}, ctx);
+
+			expect(execMock).toHaveBeenCalledWith(
+				"sshfs",
+				expect.arrayContaining(["-o", "StrictHostKeyChecking=yes"]),
+				expect.any(Object)
+			);
+			// Ensure accept-new is NOT in the args
+			const sshfsCall = execMock.mock.calls.find((call: string[]) => call[0] === "sshfs");
+			expect(sshfsCall).toBeDefined();
+			expect(sshfsCall![1]).not.toContain("StrictHostKeyChecking=accept-new");
 		});
 
 		it("should get remote home when ssh-cwd not provided", async () => {

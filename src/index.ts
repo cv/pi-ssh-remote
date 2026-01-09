@@ -25,6 +25,20 @@ export interface SSHConfig {
 	command: string | null;
 	cwd: string | null;
 	timeout: number | null;
+	strictHostKey: boolean;
+}
+
+/**
+ * Parse a string as a positive integer with validation
+ */
+function parsePositiveInt(value: string | undefined, name: string, options?: { max?: number }): number | null {
+	if (!value) return null;
+	const num = parseInt(value, 10);
+	if (isNaN(num) || num < 1 || (options?.max && num > options.max)) {
+		const rangeHint = options?.max ? ` Must be between 1 and ${options.max}.` : " Must be a positive number.";
+		throw new Error(`Invalid ${name}: ${value}.${rangeHint}`);
+	}
+	return num;
 }
 
 // Track mount state for cleanup
@@ -71,13 +85,19 @@ export default function sshRemoteExtension(pi: ExtensionAPI): void {
 		type: "boolean",
 	});
 
-	// Build config from flags
+	pi.registerFlag("ssh-strict-host-key", {
+		description: "Require known host keys (reject unknown hosts instead of auto-accepting)",
+		type: "boolean",
+	});
+
+	// Build config from flags with validation
 	const getConfig = (): SSHConfig => ({
 		host: (pi.getFlag("ssh-host") as string) || null,
-		port: pi.getFlag("ssh-port") ? parseInt(pi.getFlag("ssh-port") as string, 10) : null,
+		port: parsePositiveInt(pi.getFlag("ssh-port") as string, "SSH port", { max: 65535 }),
 		command: (pi.getFlag("ssh-command") as string) || null,
 		cwd: (pi.getFlag("ssh-cwd") as string) || null,
-		timeout: pi.getFlag("ssh-timeout") ? parseInt(pi.getFlag("ssh-timeout") as string, 10) : null,
+		timeout: parsePositiveInt(pi.getFlag("ssh-timeout") as string, "SSH timeout"),
+		strictHostKey: (pi.getFlag("ssh-strict-host-key") as boolean) || false,
 	});
 
 	// Register the SSH-wrapped bash tool
@@ -265,7 +285,11 @@ function buildSSHFSArgs(config: SSHConfig, remotePath: string, localPath: string
 	}
 
 	// Common SSHFS options
-	args.push("-o", "StrictHostKeyChecking=accept-new");
+	if (config.strictHostKey) {
+		args.push("-o", "StrictHostKeyChecking=yes");
+	} else {
+		args.push("-o", "StrictHostKeyChecking=accept-new");
+	}
 	args.push("-o", "reconnect");
 	args.push("-o", "ServerAliveInterval=15");
 

@@ -76,8 +76,49 @@ export function truncateHead(content: string, options: { maxLines?: number; maxB
 	};
 }
 
-// Type exports (minimal interfaces for testing)
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ExtensionAPI {}
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ExtensionContext {}
+// Type exports (interfaces for testing)
+export interface ExtensionContext {
+	cwd: string;
+	ui: {
+		notify(message: string, level: string): void;
+		setStatus(message: string): void;
+	};
+	sessionManager: {
+		getBranch(): unknown[];
+	};
+}
+
+export interface ExtensionAPI {
+	registerFlag(name: string, options: { description: string; type: string }): void;
+	registerTool(tool: unknown): void;
+	getFlag(name: string): string | boolean | undefined;
+	on(event: string, handler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>): void;
+	exec(
+		cmd: string,
+		args: string[],
+		options?: { timeout?: number; signal?: AbortSignal; cwd?: string }
+	): Promise<{ code: number; stdout: string; stderr: string }>;
+}
+
+// Mock for createBashTool - will be replaced by jest.mock in tests
+export interface BashToolResult {
+	content: Array<{ type: string; text: string }>;
+	details: Record<string, unknown>;
+}
+
+export interface BashTool {
+	execute(
+		toolCallId: string,
+		params: { command: string; timeout?: number },
+		signal?: AbortSignal,
+		onUpdate?: (data: unknown) => void
+	): Promise<BashToolResult>;
+}
+
+export function createBashTool(_cwd: string): BashTool {
+	return {
+		async execute() {
+			return { content: [{ type: "text", text: "" }], details: {} };
+		},
+	};
+}
