@@ -6,10 +6,7 @@ module.exports = {
 		"^.+\\.tsx?$": [
 			"ts-jest",
 			{
-				tsconfig: {
-					module: "commonjs",
-					esModuleInterop: true,
-				},
+				tsconfig: "tsconfig.test.json",
 			},
 		],
 	},
@@ -19,4 +16,10 @@ module.exports = {
 	coverageDirectory: "coverage",
 	coverageReporters: ["text", "lcov", "html"],
 	moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
+	setupFilesAfterEnv: ["<rootDir>/tests/setup.ts"],
+	moduleNameMapper: {
+		"^@mariozechner/pi-coding-agent$": "<rootDir>/__mocks__/@mariozechner/pi-coding-agent.ts",
+		"^@mariozechner/pi-tui$": "<rootDir>/__mocks__/@mariozechner/pi-tui.ts",
+		"^@sinclair/typebox$": "<rootDir>/__mocks__/@sinclair/typebox.ts",
+	},
 };

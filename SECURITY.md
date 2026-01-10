@@ -8,112 +8,63 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within pi-ssh-remote, please send an email to the repository maintainer. All security vulnerabilities will be promptly addressed.
+If you discover a security vulnerability, please email the repository maintainer. **Do not report security vulnerabilities through public GitHub issues.**
 
-**Please do not report security vulnerabilities through public GitHub issues.**
-
-When reporting, please include:
+Include:
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
 - Suggested fix (if any)
 
-You can expect an initial response within 48 hours, and we aim to provide a fix or mitigation within 7 days for critical issues.
+Expect an initial response within 48 hours.
 
 ---
 
-## Security Audit Summary
+## Security Model
 
-This document provides a security analysis of the pi-ssh-remote extension. The audit was conducted on January 6, 2026.
+### How It Works
 
-### Project Overview
+pi-ssh-remote uses two mechanisms:
 
-pi-ssh-remote is a [pi coding agent](https://github.com/badlogic/pi-mono) extension that redirects file operations and commands to a remote host via SSH. It wraps the following tools: `bash`, `read`, `write`, `edit`, `grep`, `find`, and `ls`.
-
-### Security Architecture
+1. **SSHFS**: Mounts remote filesystem locally via SSH
+2. **SSH**: Executes bash commands on the remote host
 
 ```
-┌──────────────┐       SSH        ┌──────────────┐
-│  Local Host  │ ───────────────► │ Remote Host  │
-│  (pi agent)  │                  │  (via SSH)   │
-│              │                  │              │
-│  - Extension │                  │  - Commands  │
-│  - pi agent  │                  │  - Files     │
-└──────────────┘                  └──────────────┘
+┌──────────────┐       SSH/SSHFS      ┌──────────────┐
+│  Local Host  │ ◄──────────────────► │ Remote Host  │
+│              │                      │              │
+│  pi agent    │                      │  Files       │
+│  SSHFS mount │                      │  Commands    │
+└──────────────┘                      └──────────────┘
 ```
 
----
+### What You're Trusting
 
-## Trust Model & Security Implications
-
-### What This Extension Does
-
-When you configure pi-ssh-remote with a remote host, **all file operations and commands from the pi agent are executed on that remote host**. This includes:
-
-- **`bash`**: Executes arbitrary shell commands
-- **`read`**: Reads any file the SSH user can access
-- **`write`**: Creates or overwrites any file the SSH user can write to
-- **`edit`**: Modifies any file the SSH user can write to
-- **`grep`/`find`/`ls`**: Searches and lists files
-
-### Who You're Trusting
-
-By using this extension, you are trusting:
-
-| Entity | What You're Trusting |
-|--------|---------------------|
-| **The LLM** | To generate safe, appropriate commands for your remote host |
-| **The pi agent** | To faithfully execute the LLM's requests |
-| **The remote host** | To execute commands as expected and return accurate results |
-| **Your SSH configuration** | To authenticate only to intended hosts |
-| **Network path** | That SSH encryption protects data in transit |
+| Entity | Trust |
+|--------|-------|
+| **The LLM** | To generate safe commands |
+| **The pi agent** | To execute requests faithfully |
+| **The remote host** | To execute commands as expected |
+| **Your SSH config** | To authenticate to intended hosts |
+| **SSHFS** | To securely mount remote filesystems |
 
 ### Security Implications
 
-⚠️ **Remote Command Execution**: The `bash` tool allows execution of arbitrary commands. An LLM could potentially execute destructive commands (`rm -rf`, `shutdown`, etc.) if instructed or manipulated to do so.
+⚠️ **Remote Command Execution**: The `bash` tool executes arbitrary commands on the remote host.
 
-⚠️ **Data Exposure**: All file contents read via `read` or `grep` are sent to the LLM provider's API. Do not use this extension with files containing secrets, credentials, or sensitive data you wouldn't want sent to a third-party API.
+⚠️ **Data Exposure**: File contents are sent to the LLM provider. Don't use with sensitive data.
 
-⚠️ **Compromised Remote Host**: If the remote host is compromised, an attacker could:
-- Observe all commands and file contents
-- Return manipulated data to influence LLM behavior
-- Modify files in unexpected ways
+⚠️ **SSHFS Mount**: The remote filesystem is mounted locally. Any process on your machine can access it while mounted.
 
-### Session Data Storage
-
-This extension persists SSH configuration in pi's session files:
-
-```typescript
-{
-    host: "user@example.com",
-    remoteCwd: "/home/user/project",
-    port: 2222,
-    command: "tsh ssh"  // if using custom SSH command
-}
-```
-
-**Note:** Session files are stored in plaintext. While no passwords are stored (key-based authentication is required), the session files contain:
-- SSH username and hostname
-- Remote working directory path
-- Custom SSH command (if configured)
-- Port number (if non-default)
-
-Ensure your pi session directory has appropriate permissions (readable only by you). On most systems, this is `~/.pi/` or a project-local `.pi/` directory.
+⚠️ **Host Key Verification (TOFU)**: By default, pi-ssh-remote uses `StrictHostKeyChecking=accept-new`, which automatically accepts and remembers host keys on first connection (Trust On First Use). This is convenient but vulnerable to man-in-the-middle attacks on the first connection to a new host. For security-sensitive environments, use `--ssh-strict-host-key` to require hosts to be in your `known_hosts` file.
 
 ---
 
-## Security Best Practices for Users
+## Best Practices
 
-1. **Use Dedicated SSH Keys:** Create a dedicated key pair for pi-ssh-remote rather than reusing your main SSH key.
-
-2. **Limit Remote User Permissions:** The remote user should have minimal permissions - only access to project directories needed.
-
-3. **Use SSH Agent Forwarding Carefully:** If using `ForwardAgent`, be aware of the security implications.
-
-4. **Monitor Remote Host Access:** Review SSH authentication logs on the remote host.
-
-5. **Secure Session Files:** If pi stores session files, ensure they have appropriate permissions (readable only by you).
-
-6. **Review Commands Before Execution:** When using the pi agent with this extension, review LLM-generated commands before they're executed on production systems.
-
-
+1. **Use dedicated SSH keys** for pi-ssh-remote
+2. **Limit remote user permissions** to only what's needed
+3. **Review commands** before execution on production systems
+4. **Unmount when done** (the `pi-ssh` wrapper does this automatically)
+5. **Use `--ssh-strict-host-key`** in production/sensitive environments to prevent MITM attacks
+6. **Pre-verify host keys** by connecting manually before using pi-ssh-remote with strict mode

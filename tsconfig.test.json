@@ -1,0 +1,14 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"paths": {
+			"@mariozechner/pi-coding-agent": ["./__mocks__/@mariozechner/pi-coding-agent.ts"],
+			"@mariozechner/pi-tui": ["./__mocks__/@mariozechner/pi-tui.ts"],
+			"@sinclair/typebox": ["./__mocks__/@sinclair/typebox.ts"]
+		},
+		"noImplicitAny": false
+	}
+}
